@@ -103,15 +103,16 @@ with_timeout() {
   esac
 }
 
+while [[ -z "$ORG" ]]; do
+  read -r -p "Org (aretecp or lumist-labs): " ORG
+  ORG="${ORG## }"; ORG="${ORG%% }"
+done
+
 # Interactive mode if any required arg is missing.
 INTERACTIVE=0
 [[ -z "$REPO" || -z "$PROJECT_TITLE" ]] && INTERACTIVE=1
 
 if [[ $INTERACTIVE -eq 1 ]]; then
-  while [[ -z "$ORG" ]]; do
-    read -r -p "Org (aretecp or lumist-labs): " ORG
-    ORG="${ORG## }"; ORG="${ORG%% }"
-  done
   echo "==> Interactive setup (org: @$ORG)"
   echo
 
