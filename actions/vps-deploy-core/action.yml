@@ -235,7 +235,7 @@ runs:
     # ── 1. Render app dotenv ─────────────────────────────────────────────────
     - name: Load app secrets from Infisical (dotenv mode)
       id: load-app-secrets
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -255,7 +255,7 @@ runs:
     - name: Load extra shared folder 1 (dotenv mode)
       id: extra-1
       if: ${{ inputs.extra-shared-path-1 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -270,7 +270,7 @@ runs:
     - name: Load extra shared folder 2 (dotenv mode)
       id: extra-2
       if: ${{ inputs.extra-shared-path-2 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -285,7 +285,7 @@ runs:
     - name: Load extra shared folder 3 (dotenv mode)
       id: extra-3
       if: ${{ inputs.extra-shared-path-3 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -300,7 +300,7 @@ runs:
     - name: Load extra app folder 1 (dotenv mode)
       id: extra-app-1
       if: ${{ inputs.extra-app-path-1 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -315,7 +315,7 @@ runs:
     - name: Load extra app folder 2 (dotenv mode)
       id: extra-app-2
       if: ${{ inputs.extra-app-path-2 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -330,7 +330,7 @@ runs:
     - name: Load extra app folder 3 (dotenv mode)
       id: extra-app-3
       if: ${{ inputs.extra-app-path-3 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -426,7 +426,7 @@ runs:
 
     # ── 2. Infra creds + Tailscale ───────────────────────────────────────────
     - name: Load infra secrets from Infisical (env mode)
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: ./actions/load-infisical-secrets
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -440,7 +440,7 @@ runs:
         export-as-env: 'true'
 
     - name: Connect to Tailscale
-      uses: aretecp/github-actions/actions/tailscale-connect@v2
+      uses: ./actions/tailscale-connect
       with:
         authkey: ${{ env.TAILSCALE_AUTHKEY }}
 
