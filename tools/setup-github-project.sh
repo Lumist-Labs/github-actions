@@ -3,8 +3,8 @@
 # setup-github-project.sh
 #
 # One-shot setup for the standard Areté project structure on a GitHub repo.
-# Org defaults to 'aretecp'. Run with no args for an interactive prompt
-# (repo, project title, copy-from picker).
+# No default org — pass --org, or run with no args for an interactive prompt
+# (org, repo, project title, copy-from picker).
 #
 # Two modes:
 #
@@ -45,7 +45,7 @@
 #
 set -euo pipefail
 
-ORG="aretecp"
+ORG=""
 REPO=""
 PROJECT_TITLE=""
 PROJECT_DESCRIPTION=""
@@ -108,6 +108,10 @@ INTERACTIVE=0
 [[ -z "$REPO" || -z "$PROJECT_TITLE" ]] && INTERACTIVE=1
 
 if [[ $INTERACTIVE -eq 1 ]]; then
+  while [[ -z "$ORG" ]]; do
+    read -r -p "Org (aretecp or lumist-labs): " ORG
+    ORG="${ORG## }"; ORG="${ORG%% }"
+  done
   echo "==> Interactive setup (org: @$ORG)"
   echo
 
