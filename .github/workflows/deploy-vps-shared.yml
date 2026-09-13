@@ -385,7 +385,7 @@ jobs:
     # guard. Whether `inputs` resolves inside a called workflow's job-level
     # `concurrency` is not something this repo has verified; if it ever came back
     # empty, a key of `vps--` would serialise every deploy across all NINE repos
-    # that call this workflow — areteos, areteos-py, ari-command-center,
+    # that call this workflow — areteos, areteos-py, lumi-command-center,
     # ari-vendor-matching, bd-pulse, beacon, litellm-gateway, performance-review,
     # watterson-vendor-matching. With the repo in front, that degrades to
     # per-repo serialisation, which is still strictly better than today. It costs
