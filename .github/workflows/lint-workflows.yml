@@ -64,3 +64,22 @@ jobs:
             "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
             | tar -xz actionlint
           ./actionlint -color -shellcheck=
+
+      # actionlint has no opinion on this, and it is the one mistake in this
+      # repo that cannot be caught by reading the diff: `uses: ./actions/x`
+      # looks obviously right and is obviously wrong.
+      #
+      # #127 rewrote nine of them in vps-deploy-core to drop the org name ahead
+      # of the org move. Lint passed, review passed, and because `chore:` does
+      # not trigger release.yml it sat unreleased for 8 days — until the next
+      # `feat:` moved the v2 tag past it and took out every consumer's deploy on
+      # its first step. Reverted in #130.
+      - name: Reject relative action refs inside composite actions
+        run: |
+          set -uo pipefail
+          if hits=$(grep -rn 'uses: *\./' actions/); then
+            echo "::error::A composite action must reference a sibling action as owner/repo/path@ref, never './path'. Inside a composite action a './' path resolves against the CALLER's workspace, so a consumer's runner looks for the action in their own repo, does not find it, and the deploy fails on its first step. Offending lines follow."
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "No relative action refs under actions/."
