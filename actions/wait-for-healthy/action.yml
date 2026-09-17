@@ -92,7 +92,23 @@ runs:
           echo "::error::wait-for-healthy.sh not found at $SCRIPT. This action reads it from the repo root of its own checkout; if the file moved, this action's relative path has to move with it."
           exit 1
         fi
-        echo "b64=$(base64 -w0 "$SCRIPT")" >> "$GITHUB_OUTPUT"
+
+        # Assign, then check. `echo "b64=$(base64 ...)"` would report this
+        # step green when base64 failed: a command substitution's exit status
+        # is discarded once it becomes another command's argument, and echo
+        # itself always succeeds. Neither -e nor pipefail changes that. An
+        # empty output then decodes to an empty script, and `bash -s --` with
+        # nothing on stdin exits 0 — so the gate whose entire job is to catch a
+        # bad deploy would pass without inspecting a single container.
+        if ! b64=$(base64 -w0 "$SCRIPT"); then
+          echo "::error::Could not base64-encode $SCRIPT."
+          exit 1
+        fi
+        if [ -z "$b64" ]; then
+          echo "::error::base64 of $SCRIPT produced no output. Refusing to continue: an empty script would make this healthcheck pass without inspecting anything."
+          exit 1
+        fi
+        echo "b64=$b64" >> "$GITHUB_OUTPUT"
 
     - name: Wait for containers to become healthy
       uses: appleboy/ssh-action@v1.2.0
@@ -117,4 +133,10 @@ runs:
         # and time out every time. Seen live on ssdnode2, run 32399773948.
         script: |
           set -euo pipefail
+          # Second check on the same failure, at the other boundary: whatever
+          # empties this variable in transit, an empty script is a silent pass.
+          if [ -z "$WAIT_SCRIPT_B64" ]; then
+            echo "ERROR: healthcheck script arrived empty — refusing to report healthy without inspecting anything." >&2
+            exit 1
+          fi
           printf '%s' "$WAIT_SCRIPT_B64" | base64 -d | bash -s -- $CONTAINERS
