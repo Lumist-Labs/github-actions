@@ -729,26 +729,19 @@ runs:
 
     # ── 7. Healthcheck ───────────────────────────────────────────────────────
     - name: Wait for containers to become healthy
-      uses: appleboy/ssh-action@v1.2.0
-      env:
-        REPO_DIR: ${{ inputs.repo-dir }}
-        COMPOSE_FILE: ${{ inputs.compose-file }}
-        ENV_FILE_NAME: ${{ inputs.env-file-name }}
-        HEALTHCHECK_CONTAINERS: ${{ inputs.healthcheck-containers }}
+      # Pinned to the moving major tag, like every other cross-action ref in
+      # this repo. github.ref_name would resolve to the CALLER's ref inside a
+      # reusable workflow (a consumer's develop), which does not exist here.
+      #
+      # Consequence when changing wait-for-healthy itself: a feature branch of
+      # this action still calls @v2, so the change is only exercised once it is
+      # tagged. Cut a pre-release (release.yml, major-tag update unchecked) and
+      # point one consumer at it — do not assume a green lint covers it.
+      uses: aretecp/github-actions/actions/wait-for-healthy@v2
       with:
         host: ${{ env.VPS_TAILSCALE_IP }}
         username: ${{ inputs.vps-user }}
         key: ${{ env.VPS_SSH_KEY }}
-        envs: REPO_DIR,COMPOSE_FILE,ENV_FILE_NAME,HEALTHCHECK_CONTAINERS
-        command_timeout: 5m
-        script: |
-          set -euo pipefail
-          # Fetch wait-for-healthy.sh pinned to this workflow suite's major tag (v2).
-          # Do NOT use github.ref_name — in a reusable workflow that resolves to
-          # the CALLER's ref (e.g. a consumer's develop), which 404s here.
-          # Bump this tag when cutting a new major of the shared workflow suite.
-          curl -fsSL \
-            "https://raw.githubusercontent.com/aretecp/github-actions/v2/scripts/wait-for-healthy.sh" \
-            | COMPOSE_FILE="$REPO_DIR/$COMPOSE_FILE" \
-              ENV_FILE="$REPO_DIR/$ENV_FILE_NAME" \
-              bash -s -- $HEALTHCHECK_CONTAINERS
+        containers: ${{ inputs.healthcheck-containers }}
+        compose-file: ${{ inputs.repo-dir }}/${{ inputs.compose-file }}
+        env-file: ${{ inputs.repo-dir }}/${{ inputs.env-file-name }}

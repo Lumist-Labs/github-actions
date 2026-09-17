@@ -1,0 +1,120 @@
+name: Wait For Healthy
+description: >-
+  Poll `docker inspect` on a deploy target until every named container reports
+  `healthy`, dumping that compose project's logs if it times out. Wraps
+  scripts/wait-for-healthy.sh.
+
+# Why this action exists rather than the host fetching the script itself:
+#
+# Every call site used to run, inside the remote SSH script,
+#   curl -fsSL "https://raw.githubusercontent.com/<org>/github-actions/v2/scripts/wait-for-healthy.sh" | bash -s -- ...
+#
+# raw.githubusercontent.com carries the GitHub org in its path and does NOT
+# follow the redirect a repo transfer leaves behind. `uses:` refs do. So on the
+# day this repo changes owner, every `uses:` keeps resolving and every one of
+# those curls 404s — taking out the health gate on each deploy at once, in the
+# step whose whole job is to notice a bad deploy. H3 in
+# docs/features/operation-rename/ORG-MIGRATION.md.
+#
+# Sending the script over the SSH connection that is already open removes the
+# org from the path entirely, so the transfer cannot reach it. Same mechanism
+# aws-deploy-core already uses for its own bundled scripts
+# (actions/aws-deploy-core/action.yml, DEPLOY_SCRIPT).
+#
+# The script stays at the repo root, not in this directory: tags v1 and
+# earlier still serve `scripts/wait-for-healthy.sh` over raw to consumers that
+# have not migrated (ms-365-mcp-server, teams-bot). Moving the file would hold
+# only until someone cut a v1 patch release and moved that tag.
+
+inputs:
+  host:
+    description: SSH host to poll from — the deploy target.
+    required: true
+  username:
+    description: SSH user on the deploy target.
+    required: true
+  key:
+    description: SSH private key for `username`.
+    required: true
+  containers:
+    description: >-
+      Space-separated container names. Every one must reach `healthy`.
+      Deliberately word-split on the remote host, see the note on the
+      invocation below.
+    required: true
+  compose-file:
+    description: >-
+      Absolute path on the host to the compose file, used only to dump logs on
+      timeout. Omit to skip the dump — a timeout then reports the unhealthy
+      containers with no logs, which is the worse failure to debug.
+    required: false
+    default: ''
+  env-file:
+    description: >-
+      Absolute path on the host to the env file, passed as `--env-file` to the
+      timeout log dump. Ignored unless `compose-file` is set.
+    required: false
+    default: ''
+  timeout-seconds:
+    description: Total wait before giving up.
+    required: false
+    default: '150'
+  poll-interval:
+    description: Seconds between polls.
+    required: false
+    default: '5'
+  log-tail:
+    description: Log lines per container to dump on timeout.
+    required: false
+    default: '100'
+  command-timeout:
+    description: >-
+      SSH command timeout. Must exceed `timeout-seconds`, or the connection
+      dies first and the failure reads as a network problem rather than an
+      unhealthy container.
+    required: false
+    default: 5m
+
+runs:
+  using: composite
+  steps:
+    # base64, not the raw file: appleboy/ssh-action's `envs` become `export`
+    # lines in the remote script, and a value containing newlines and quotes
+    # cannot survive that intact. One line of base64 always can.
+    - name: Stage the healthcheck script
+      id: stage
+      shell: bash
+      env:
+        SCRIPT: ${{ github.action_path }}/../../scripts/wait-for-healthy.sh
+      run: |
+        set -uo pipefail
+        if [ ! -s "$SCRIPT" ]; then
+          echo "::error::wait-for-healthy.sh not found at $SCRIPT. This action reads it from the repo root of its own checkout; if the file moved, this action's relative path has to move with it."
+          exit 1
+        fi
+        echo "b64=$(base64 -w0 "$SCRIPT")" >> "$GITHUB_OUTPUT"
+
+    - name: Wait for containers to become healthy
+      uses: appleboy/ssh-action@v1.2.0
+      env:
+        WAIT_SCRIPT_B64: ${{ steps.stage.outputs.b64 }}
+        CONTAINERS: ${{ inputs.containers }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+        ENV_FILE: ${{ inputs.env-file }}
+        TIMEOUT_SECONDS: ${{ inputs.timeout-seconds }}
+        POLL_INTERVAL: ${{ inputs.poll-interval }}
+        LOG_TAIL: ${{ inputs.log-tail }}
+      with:
+        host: ${{ inputs.host }}
+        username: ${{ inputs.username }}
+        key: ${{ inputs.key }}
+        envs: WAIT_SCRIPT_B64,CONTAINERS,COMPOSE_FILE,ENV_FILE,TIMEOUT_SECONDS,POLL_INTERVAL,LOG_TAIL
+        command_timeout: ${{ inputs.command-timeout }}
+        # $CONTAINERS is unquoted on purpose. The script re-splits "$*" with
+        # `read -ra` because this runs in the target user's LOGIN shell: bash
+        # word-splits the expansion into N args, zsh passes one arg containing
+        # spaces, and the zsh case would inspect a container named "app db"
+        # and time out every time. Seen live on ssdnode2, run 32399773948.
+        script: |
+          set -euo pipefail
+          printf '%s' "$WAIT_SCRIPT_B64" | base64 -d | bash -s -- $CONTAINERS

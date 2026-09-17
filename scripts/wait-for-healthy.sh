@@ -2,16 +2,11 @@
 # Polls `docker inspect` for a list of containers until all report
 # `.State.Health.Status == "healthy"`, or until timeout.
 #
-# Designed to run on a deploy target (VPS) inside an SSH-action's `script:`
-# block. Consumers fetch + pipe at deploy time:
-#
-#   curl -fsSL "https://raw.githubusercontent.com/aretecp/github-actions/v1/scripts/wait-for-healthy.sh" \
-#     | TIMEOUT_SECONDS=150 \
-#       COMPOSE_FILE=docker-compose.prod.yml \
-#       ENV_FILE=.env \
-#       bash -s -- areteos_app areteos_db
-#
-# Pin to `v1` for moving major, or `<full-sha>` for immutable reproducibility.
+# Runs on a deploy target (VPS). Workflows do not invoke this directly — they
+# use actions/wait-for-healthy, which ships these bytes over the SSH connection
+# it already opened and pipes them to bash. Do not reintroduce a
+# raw.githubusercontent.com fetch: that URL carries the GitHub org in its path
+# and 404s on a repo transfer, silently taking out every deploy's health gate.
 #
 # Usage:
 #   wait-for-healthy.sh <container1> [container2 ...]
