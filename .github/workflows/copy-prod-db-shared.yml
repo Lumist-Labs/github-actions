@@ -509,25 +509,14 @@ jobs:
 
       - name: Wait for dev containers to become healthy
         if: ${{ inputs.dev-healthcheck-containers != '' }}
-        uses: appleboy/ssh-action@v1.2.0
-        env:
-          REPO_DIR: ${{ inputs.repo-dir }}
-          DEV_COMPOSE_FILE: ${{ inputs.dev-compose-file }}
-          DEV_HEALTHCHECK_CONTAINERS: ${{ inputs.dev-healthcheck-containers }}
+        uses: aretecp/github-actions/actions/wait-for-healthy@v2
         with:
           host: ${{ env.VPS_TAILSCALE_IP }}
           username: ${{ inputs.vps-user }}
           key: ${{ env.VPS_SSH_KEY }}
-          envs: REPO_DIR,DEV_COMPOSE_FILE,DEV_HEALTHCHECK_CONTAINERS
-          command_timeout: 5m
-          script: |
-            set -euo pipefail
-            # For the dev copy there is no .env to pass — the dev container
-            # manages its own env file. We use the compose file for context only.
-            # wait-for-healthy.sh only needs container names to inspect.
-            # Pin to v2 — same major as the other shared workflows.
-            curl -fsSL \
-              "https://raw.githubusercontent.com/aretecp/github-actions/v2/scripts/wait-for-healthy.sh" \
-              | COMPOSE_FILE="$REPO_DIR/$DEV_COMPOSE_FILE" \
-                ENV_FILE="$REPO_DIR/.env.dev" \
-                bash -s -- $DEV_HEALTHCHECK_CONTAINERS
+          containers: ${{ inputs.dev-healthcheck-containers }}
+          compose-file: ${{ inputs.repo-dir }}/${{ inputs.dev-compose-file }}
+          # Hardcoded, unlike the deploy path: this workflow's caller names no
+          # dev env file, and the dev containers manage their own. It is only
+          # read for the timeout log dump.
+          env-file: ${{ inputs.repo-dir }}/.env.dev

@@ -1,6 +1,14 @@
 # `scripts/`
 
-**Runtime-shared bash utilities** consumed at deploy time by SSH-script workflows. Fetched from consumer workflows via `curl`, executed on the deploy target (VPS).
+**Runtime-shared bash utilities** executed on the deploy target (VPS).
+
+A `curl` from inside the remote SSH script was the original mechanism, and
+still is for the two `docker-prune` scripts an operator runs by hand. No
+workflow should use it: `raw.githubusercontent.com` carries the GitHub org in
+its path and does not follow the redirect a repo transfer leaves behind, so an
+org move 404s every one of those fetches at once. A workflow gets the script
+shipped over the SSH connection by a composite action instead — see
+[`actions/wait-for-healthy`](../actions/wait-for-healthy/).
 
 For admin / local-execution scripts run by a maintainer, see [`../tools/`](../tools/).
 
@@ -8,7 +16,7 @@ For admin / local-execution scripts run by a maintainer, see [`../tools/`](../to
 
 | Script | Description | Runs on |
 |---|---|---|
-| [`wait-for-healthy.sh`](wait-for-healthy.sh) | Poll `docker inspect` for a list of containers until all report `healthy`, or timeout (with optional log dump on failure) | VPS |
+| [`wait-for-healthy.sh`](wait-for-healthy.sh) | Poll `docker inspect` for a list of containers until all report `healthy`, or timeout (with optional log dump on failure). Consume via [`actions/wait-for-healthy`](../actions/wait-for-healthy/), not `curl` | VPS |
 | [`docker-prune.sh`](docker-prune.sh) | Reclaim Docker disk (dangling images, aged build cache), then exit non-zero if usage or free space breaches a threshold | VPS |
 | [`install-docker-prune.sh`](install-docker-prune.sh) | Install `docker-prune.sh` on a VPS and schedule it — systemd timer where sudo allows, user crontab otherwise | VPS |
 | [`entra-credential-scan.sh`](entra-credential-scan.sh) | Enumerate every Entra app registration and report each credential's expiry as JSON, soonest-first. Read-only Graph query. | Runner |
@@ -21,26 +29,21 @@ For admin / local-execution scripts run by a maintainer, see [`../tools/`](../to
 
 ## Consuming a script in a workflow
 
-Inside an SSH script (typical for deploy workflows that connect via Tailscale + SSH):
-
 ```yaml
-- name: Deploy + wait for healthy
-  uses: appleboy/ssh-action@v1
+- name: Wait for healthy
+  uses: aretecp/github-actions/actions/wait-for-healthy@v2
   with:
-    host: ${{ secrets.VPS_TAILSCALE_IP }}
-    username: ${{ secrets.VPS_USER }}
-    key: ${{ secrets.VPS_SSH_KEY }}
-    script: |
-      cd ~/areteos
-      docker compose -f docker-compose.prod.yml up -d --build
-
-      # Pin to v1 (moving major) — picks up patch fixes automatically
-      curl -fsSL "https://raw.githubusercontent.com/aretecp/github-actions/v1/scripts/wait-for-healthy.sh" \
-        | TIMEOUT_SECONDS=150 \
-          COMPOSE_FILE=docker-compose.prod.yml \
-          ENV_FILE=.env \
-          bash -s -- areteos_app areteos_db
+    host: ${{ env.VPS_TAILSCALE_IP }}
+    username: ${{ inputs.vps-user }}
+    key: ${{ env.VPS_SSH_KEY }}
+    containers: areteos_app areteos_db
+    compose-file: /home/sglyon/areteos/docker-compose.prod.yml
+    env-file: /home/sglyon/areteos/.env
 ```
+
+Paths must be absolute on the host — no `~`, which does not expand inside the
+quoted variable the script receives. The action never reads them itself; it
+hands them to `docker compose logs` if the wait times out.
 
 ## Docker disk cleanup on a VPS
 
@@ -90,6 +93,9 @@ percent alone under-reads the danger on a volume that size.
 
 ## Pinning
 
+For the two `docker-prune` scripts. Every pin below hardcodes the org, which is
+why a workflow must not fetch this way — a repo transfer breaks all of them.
+
 Pick the ref that matches your trust + reproducibility tradeoff:
 
 | Pin | Use when |
@@ -98,8 +104,15 @@ Pick the ref that matches your trust + reproducibility tradeoff:
 | `https://raw.githubusercontent.com/aretecp/github-actions/v1.2.3/scripts/...` | You want exact reproducibility but can manually upgrade |
 | `https://raw.githubusercontent.com/aretecp/github-actions/<full-sha>/scripts/...` | Strict — security-sensitive workflows |
 
-## Why scripts instead of composite actions?
+## Why a script, wrapped in an action
 
-Composite actions execute on the GitHub-hosted runner. Most of our deploy logic happens **on the remote VPS via SSH**, where the GitHub runner can't reach Docker directly. A composite action wrapping `docker inspect` would have to either SSH for each call (slow + fragile) or shell out to `DOCKER_HOST=ssh://...` (workable but fiddly).
+The logic belongs in bash on the VPS: the runner can't reach that box's Docker
+daemon, and a composite action wrapping `docker inspect` would have to SSH per
+call or go through `DOCKER_HOST=ssh://...`.
 
-Bash scripts pulled at deploy time and executed in-context sidestep that entirely. Same destination as a composite action — single source of truth, version-pinnable — different mechanism.
+The original reading of that was "so the host fetches the script itself," which
+put the org in the path. It doesn't follow. A composite action opens one SSH
+connection anyway, so it can carry the script's own bytes across and pipe them
+to `bash` — the logic still runs on the VPS, and nothing resolves a URL at
+deploy time. That is what `actions/wait-for-healthy` does, and it is the pattern
+for anything a workflow consumes from here.

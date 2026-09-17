@@ -10,6 +10,7 @@ Reusable composite actions and workflows for `aretecp` repos. Drop-in `uses:` re
 | [`tailscale-connect`](actions/tailscale-connect) | Join the Areté Tailscale tailnet. Wraps `tailscale/github-action` with a pinned SHA and corrected input names. | `v1` |
 | [`aws-deploy-core`](actions/aws-deploy-core) | Assume an AWS role via OIDC, resolve resource names from SSM, deploy, and wait for it to be live. Strategy by `target` input; `s3-cloudfront` shipped. Does not build. | `_in development_` |
 | [`teams-notify`](actions/teams-notify) | Post a MessageCard to a Teams incoming webhook. Semantic `status` colours, optional facts block and button, `dry-run` mode. Webhook passed via `env:`, not an input. | `v1` |
+| [`wait-for-healthy`](actions/wait-for-healthy) | Poll `docker inspect` over SSH until every named container is `healthy`, dumping compose logs on timeout. Ships `scripts/wait-for-healthy.sh` to the host instead of having the host `curl` it. | `v2` |
 
 More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own composite action under `actions/<name>/`.
 
