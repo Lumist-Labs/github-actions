@@ -280,7 +280,7 @@ jobs:
 
       # Load Tailscale + VPS credentials only. No app secrets, no .env render.
       - name: Load infra secrets from Infisical (env mode)
-        uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
         with:
           method: oidc
           identity-id: ${{ inputs.infisical-identity-id }}
@@ -292,7 +292,7 @@ jobs:
           export-as-env: 'true'
 
       - name: Connect to Tailscale
-        uses: aretecp/github-actions/actions/tailscale-connect@v2
+        uses: Lumist-Labs/github-actions/actions/tailscale-connect@v2
         with:
           authkey: ${{ env.TAILSCALE_AUTHKEY }}
 
@@ -509,7 +509,7 @@ jobs:
 
       - name: Wait for dev containers to become healthy
         if: ${{ inputs.dev-healthcheck-containers != '' }}
-        uses: aretecp/github-actions/actions/wait-for-healthy@v2
+        uses: Lumist-Labs/github-actions/actions/wait-for-healthy@v2
         with:
           host: ${{ env.VPS_TAILSCALE_IP }}
           username: ${{ inputs.vps-user }}

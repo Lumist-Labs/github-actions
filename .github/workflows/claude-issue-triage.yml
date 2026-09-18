@@ -59,7 +59,7 @@ name: Claude Issue Triage (shared)
 #     id-token: write
 #   jobs:
 #     triage:
-#       uses: aretecp/github-actions/.github/workflows/claude-issue-triage.yml@v2
+#       uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-triage.yml@v2
 
 on:
   workflow_call:
@@ -186,7 +186,7 @@ jobs:
       # coalescing has to happen at the use site.
       - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
         if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
-        uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
         with:
           method: oidc
           identity-id: ${{ inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID }}
