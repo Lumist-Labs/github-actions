@@ -5,7 +5,7 @@ Composite action that joins the Areté Tailscale tailnet on a GitHub Actions run
 ## Usage
 
 ```yaml
-- uses: aretecp/github-actions/actions/tailscale-connect@v2
+- uses: Lumist-Labs/github-actions/actions/tailscale-connect@v2
   with:
     authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
 ```

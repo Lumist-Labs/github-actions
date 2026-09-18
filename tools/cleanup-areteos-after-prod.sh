@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cleans up redundant repo/env-level secrets and vars in `aretecp/areteos`
 # AFTER deploy-prod.yml + rollback-prod.yml + copy-prod-db.yml are migrated
-# to load app secrets from Infisical via aretecp/github-actions/actions/load-infisical-secrets.
+# to load app secrets from Infisical via Lumist-Labs/github-actions/actions/load-infisical-secrets.
 #
 # DO NOT RUN until prod is migrated — the targets here are still consumed
 # by prod workflows today. Running early will break prod deploys.

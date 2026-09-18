@@ -2,7 +2,7 @@
 # Cleans up redundant repo-level vars in `aretecp/arilearn-phx` after the
 # prod-side workflows (deploy-prod.yml, rollback-prod.yml, copy-prod-db.yml)
 # are migrated to load secrets from Infisical via
-# aretecp/github-actions/actions/load-infisical-secrets.
+# Lumist-Labs/github-actions/actions/load-infisical-secrets.
 #
 # DO NOT RUN until prod is migrated — the targets here are still consumed
 # by prod workflows today. Running early breaks prod deploys.

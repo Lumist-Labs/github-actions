@@ -47,7 +47,7 @@ exists to prevent.
 3. The resulting Graph token is used for one read-only query.
 
 The federated credential's subject is pinned to
-`repo:aretecp/github-actions:ref:refs/heads/main`.
+`repo:Lumist-Labs/github-actions:ref:refs/heads/main`.
 
 ## Reading the output
 

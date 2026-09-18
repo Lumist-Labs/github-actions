@@ -1,6 +1,6 @@
 # Cross-repo workflow consolidation analysis
 
-Survey of `.github/workflows/` files across the six Areté repos that consume the shared-actions repo today. Goal: identify what can move from per-repo duplication into either a reusable workflow or a composite action in `aretecp/github-actions`.
+Survey of `.github/workflows/` files across the six Areté repos that consume the shared-actions repo today. Goal: identify what can move from per-repo duplication into either a reusable workflow or a composite action in `Lumist-Labs/github-actions`.
 
 Date of analysis: 2026-05-08.
 
@@ -50,7 +50,7 @@ SHA1 fingerprints by file (identical = byte-for-byte same).
 on: { issues: { types: [opened] }, issue_comment: { types: [created] } }
 jobs:
   triage:
-    uses: aretecp/github-actions/.github/workflows/claude-issue-triage.yml@v1
+    uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-triage.yml@v1
     with:
       environment: production
     secrets:

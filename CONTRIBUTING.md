@@ -1,6 +1,6 @@
 # Contributing
 
-This repo holds shared **composite GitHub Actions** for `aretecp` repos. Each action lives in its own directory under `actions/` and is consumed by other repos via `uses: aretecp/github-actions/actions/<name>@<ref>`.
+This repo holds shared **composite GitHub Actions** for `aretecp` repos. Each action lives in its own directory under `actions/` and is consumed by other repos via `uses: Lumist-Labs/github-actions/actions/<name>@<ref>`.
 
 ## Repo layout
 

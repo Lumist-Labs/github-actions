@@ -12,7 +12,7 @@ Review the shared side first — every app PR is just a 13-line file that depend
 
 | # | PR | Repo | Diff | What to look at |
 |---|---|---|---|---|
-| 1 | [github-actions#65](https://github.com/aretecp/github-actions/pull/65) | github-actions | +60/−22 | Docs only. The plan doc, including two corrections I had to make mid-flight. |
+| 1 | [github-actions#65](https://github.com/Lumist-Labs/github-actions/pull/65) | github-actions | +60/−22 | Docs only. The plan doc, including two corrections I had to make mid-flight. |
 | 2 | [areteos#1449](https://github.com/aretecp/areteos/pull/1449) | areteos | +11/−14 | Representative shim. If this one reads right, 5 others are byte-identical. |
 | 3 | [beacon#129](https://github.com/aretecp/beacon/pull/129) | beacon | +9/−19 | Same file. Behavior change: used to analyze `develop`, now `main`. |
 | 4 | [bd-pulse#2639](https://github.com/aretecp/bd-pulse/pull/2639) | bd-pulse | +12/−128 | Deletes the largest inline copy. |

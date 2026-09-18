@@ -25,7 +25,7 @@ More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own compos
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Auto-triage of new issues / `@claude` comments via Claude Code. Bundled system prompt at `.claude/prompts/ci-triage.md`. Callers pass **no inputs at all** — see [zero-config shim](#zero-config-consumer-shim). | `v2` |
 | [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | On PRs targeting `main`: gather context → Claude summary → update PR body + Closes #N footers → Teams card. | `v1` |
 
-Reusable workflows are called via `jobs.<name>.uses: aretecp/github-actions/.github/workflows/<file>@v1` in the consumer repo. See the workflow file's header comments for inputs and prerequisites.
+Reusable workflows are called via `jobs.<name>.uses: Lumist-Labs/github-actions/.github/workflows/<file>@v1` in the consumer repo. See the workflow file's header comments for inputs and prerequisites.
 
 ### Scheduled workflows (run here, not called)
 
@@ -61,7 +61,7 @@ permissions:
 
 jobs:
   triage:
-    uses: aretecp/github-actions/.github/workflows/claude-issue-triage.yml@v2
+    uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-triage.yml@v2
 ```
 
 That is the entire file. Every `infisical-*` input, plus `checkout-ref`, `environment`, and
@@ -96,7 +96,7 @@ what must never be baked in.
 Pin to the moving major tag for non-breaking updates:
 
 ```yaml
-- uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
   with:
     project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
     environment: prod
@@ -109,8 +109,8 @@ Pin to the moving major tag for non-breaking updates:
 Or pin to a specific version / SHA for stricter reproducibility:
 
 ```yaml
-- uses: aretecp/github-actions/actions/load-infisical-secrets@v1.0.0
-- uses: aretecp/github-actions/actions/load-infisical-secrets@<full-commit-sha>
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1.0.0
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@<full-commit-sha>
 ```
 
 ## Runners and CI

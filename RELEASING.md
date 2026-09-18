@@ -9,9 +9,9 @@ This repo uses **single-repo versioning**. One annotated `vX.Y.Z` tag per releas
 Consumers pin per-action via path:
 
 ```yaml
-- uses: aretecp/github-actions/actions/load-infisical-secrets@v1
-- uses: aretecp/github-actions/actions/load-infisical-secrets@v1.0.0
-- uses: aretecp/github-actions/actions/load-infisical-secrets@<full-sha>
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1.0.0
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@<full-sha>
 ```
 
 When a second action ships, both share the same `v1`/`v2` cadence. If divergent release cycles become painful, switch to per-action tags (`load-infisical-secrets/v1`) — that's a future migration, not how this repo starts.

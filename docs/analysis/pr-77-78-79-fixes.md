@@ -3,7 +3,7 @@
 > ## Status update — 2026-08-06, after the areteos finding
 >
 > **Done:**
-> - Item 2 from the long-term list shipped as `aretecp/github-actions#81` — VPS operations now
+> - Item 2 from the long-term list shipped as `Lumist-Labs/github-actions#81` — VPS operations now
 >   serialise on the deploy target inside the three shared workflows. This supersedes issue **B1**
 >   below: the fix landed in the shared repo rather than per-consumer, so no areteos change is needed.
 > - Bucket A1 posted as a review comment on `#79`.
@@ -34,7 +34,7 @@ process noise:
 - **Bucket B — new issues.** Separate work: different repo, or genuinely out of scope for the PR.
 
 > **Note on cross-repo refs in every draft below:** all references to another repo's PR/issue are
-> fully qualified (`aretecp/github-actions#79`), never bare `#79`. `pr-to-main-hooks.yml`'s
+> fully qualified (`Lumist-Labs/github-actions#79`), never bare `#79`. `pr-to-main-hooks.yml`'s
 > auto-closes harvester turns a bare `#N` in a release-PR body into `Closes #N` against the *consumer*
 > repo, which would close an unrelated issue. Keep this convention when editing the drafts.
 
@@ -314,7 +314,7 @@ The two things it surfaces are separate work → issues B1 and B2.
 
 ## B1. `aretecp/areteos` — dev and prod VPS deploys race one working tree
 
-**Priority:** P1. This one can corrupt a prod deploy, and `aretecp/github-actions#77` makes it more
+**Priority:** P1. This one can corrupt a prod deploy, and `Lumist-Labs/github-actions#77` makes it more
 likely.
 
 **Title:** `fix(deploy): dev and prod deploys race the same VPS working tree`
@@ -340,7 +340,7 @@ likely.
 >
 > areteos never got the same treatment.
 >
-> **Why now:** `aretecp/github-actions#77` raises the compose-up SSH timeout from 10m to 30m so a cold
+> **Why now:** `Lumist-Labs/github-actions#77` raises the compose-up SSH timeout from 10m to 30m so a cold
 > build isn't cut short. That is the right fix, but it triples the window during which a dev cold
 > build is holding the tree.
 >
@@ -371,7 +371,7 @@ likely.
 > `docker compose build`, so a cancelled deploy keeps compiling on the VPS while its replacement starts
 > a second build. Under Option B that's tolerable (separate trees); under Option A set it to `false`.
 
-## B2. `aretecp/github-actions` — `pre-compose-up-script` has the same hardcoded 10m ceiling
+## B2. `Lumist-Labs/github-actions` — `pre-compose-up-script` has the same hardcoded 10m ceiling
 
 **Priority:** P2. Same failure class `#77` just fixed, one step earlier.
 
@@ -400,7 +400,7 @@ likely.
 > Low urgency today: `areteos` passes `db-type: none` and `bd-pulse`'s SQLite snapshot is small. It
 > matters the first time a Postgres restore is wired up.
 
-## B3. `aretecp/github-actions` — CI base images rollout gate
+## B3. `Lumist-Labs/github-actions` — CI base images rollout gate
 
 **Priority:** P1 as a gate, and it's the thing most likely to break CI fleet-wide if done out of
 order.
@@ -409,7 +409,7 @@ order.
 
 **Body:**
 
-> Tracking issue for landing `aretecp/github-actions#79` safely. **The consumer swap PRs must not
+> Tracking issue for landing `Lumist-Labs/github-actions#79` safely. **The consumer swap PRs must not
 > merge before step 2.**
 >
 > `container.image` is pulled before any step runs. A private GHCR package fails the job at startup
@@ -434,7 +434,7 @@ order.
 > `manifest.json` lists `arilearn-phx (ci.yml)` as one consumer; it has two container jobs, both of
 > which install Hex + Rebar.
 
-## B4. `aretecp/github-actions` — weekly image rebuild republishes moving tags unvalidated
+## B4. `Lumist-Labs/github-actions` — weekly image rebuild republishes moving tags unvalidated
 
 **Priority:** P2, design decision. File after `#79` merges.
 
@@ -470,9 +470,9 @@ separately, so this is only if you want it tracked.
 
 **Body:**
 
-> `release.yml` pins `aretecp/github-actions/.github/workflows/release-shared.yml@v1`. `v1` is frozen
+> `release.yml` pins `Lumist-Labs/github-actions/.github/workflows/release-shared.yml@v1`. `v1` is frozen
 > at `5c93f3c1` (tip commit `7d245ad`, 2026-05-27) — releases now advance `v2`. So this repo gets no
-> fixes to the shared release workflow, and `aretecp/github-actions#78`'s `close-released-issues`
+> fixes to the shared release workflow, and `Lumist-Labs/github-actions#78`'s `close-released-issues`
 > input will not exist at `@v1`.
 >
 > Verified safe: `release-shared.yml` is **byte-identical** at the `v1` tip and the `v2` tip
@@ -486,7 +486,7 @@ separately, so this is only if you want it tracked.
 > `v1` stopped moving when `v2` was cut. Consequence-free so far only because of the byte-identity
 > above.
 
-## B6 (optional). `aretecp/github-actions` — reduce the per-commit API cost of issue closing
+## B6 (optional). `Lumist-Labs/github-actions` — reduce the per-commit API cost of issue closing
 
 **Priority:** P3. Only worth filing if A2.3 and A2.5 land and you still want the loop rewritten.
 

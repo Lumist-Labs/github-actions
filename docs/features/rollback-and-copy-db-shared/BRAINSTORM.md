@@ -2,7 +2,7 @@
 
 **Status**: Draft
 **Created**: 2026-06-04
-**Topic**: Convert per-repo `rollback-prod.yml` and `copy-prod-db.yml` into shared reusable workflow(s) under `aretecp/github-actions`, following the `deploy-vps-shared.yml@v2` pattern.
+**Topic**: Convert per-repo `rollback-prod.yml` and `copy-prod-db.yml` into shared reusable workflow(s) under `Lumist-Labs/github-actions`, following the `deploy-vps-shared.yml@v2` pattern.
 
 ---
 
