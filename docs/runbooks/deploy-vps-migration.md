@@ -114,7 +114,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: aretecp/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+    uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
     with:
       environment: dev
       infisical-identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -242,7 +242,7 @@ permissions:
   id-token: write
 jobs:
   deploy:
-    uses: aretecp/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+    uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
     with:
       environment: development
       infisical-identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -281,7 +281,7 @@ permissions:
   id-token: write
 jobs:
   deploy:
-    uses: aretecp/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+    uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
     with:
       environment: production
       infisical-identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -321,7 +321,7 @@ v2 deploy is currently deploy-from-scratch only. If a deploy produces a broken `
 2. Restore the previous `.env` from the backup (`cp /srv/myapp/.env.bak /srv/myapp/.env`).
 3. Re-run `docker compose --env-file .env -f docker-compose.prod.yml up -d`.
 
-A `rollback-prod` workflow covering this path is a planned fast-follow to v2. See aretecp/github-actions for tracking.
+A `rollback-prod` workflow covering this path is a planned fast-follow to v2. See Lumist-Labs/github-actions for tracking.
 
 ---
 

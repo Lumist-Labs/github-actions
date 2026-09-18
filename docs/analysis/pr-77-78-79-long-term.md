@@ -5,7 +5,7 @@ cause wearing different hats. Ranked by leverage.
 
 Facts verified while writing this:
 
-- `aretecp/github-actions` is **PUBLIC**; default branch `main`
+- `Lumist-Labs/github-actions` is **PUBLIC**; default branch `main`
 - `areteos` default `main`, `bd-pulse` default `main`, **`arilearn-phx` default `develop`**
 - Issue #4 ("Smoke-test workflow for load-infisical-secrets") exists and is **CLOSED** —
   `RELEASING.md` still points at it as the way to re-enable a validation gate
@@ -175,7 +175,7 @@ Issue #4 designed the smoke gate and was closed on "the public-repo logging trad
 is real: `github-actions` is **PUBLIC**, so exercising live Infisical/VPS/GHCR credentials inside it
 leaks into public logs.
 
-**Fix:** `aretecp/github-actions-canary`, **private** — a throwaway app with a small real compose
+**Fix:** `Lumist-Labs/github-actions-canary`, **private** — a throwaway app with a small real compose
 stack on the VPS and its own scoped Infisical folder. It pins `@main`. A scheduled + pre-release run
 exercises the whole chain: deploy → healthcheck → rollback → release → issue close. Private repo
 means real secrets and real logs with no exposure, which is exactly what killed #4.
@@ -206,7 +206,7 @@ patch/minor fixes automatically."* Nothing noticed, and nothing would have. The 
 hide PR #79's rollout half-states — packages still private, consumers still installing prereqs.
 
 **Fix:** reuse `entra-secret-detector.yml`'s shape exactly — scheduled, read-only, reports findings
-in the summary, silent when clean. Enumerate org repos, grep `uses: aretecp/github-actions/...@REF`,
+in the summary, silent when clean. Enumerate org repos, grep `uses: Lumist-Labs/github-actions/...@REF`,
 flag any ref that is not the current major.
 
 **Cost:** 1–2 hours, and it extends a proven in-repo pattern rather than inventing one.

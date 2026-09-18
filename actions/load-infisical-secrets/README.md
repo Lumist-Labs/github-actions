@@ -55,7 +55,7 @@ jobs:
       contents: read
       id-token: write   # ← required for OIDC token issuance
     steps:
-      - uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+      - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -71,7 +71,7 @@ No stored Infisical credentials. The `identity-id` is a non-sensitive UUID; safe
 ### Universal Auth mode (legacy)
 
 ```yaml
-- uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
   with:
     project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
     environment: prod
@@ -109,7 +109,7 @@ If `lumist-labs-shared` is loaded **recursively** at `/`, its subfolders may con
 steps:
   # 1. Shared first — applies org-wide defaults and cross-cutting infra
   - name: Load shared infra secrets from Infisical (OIDC)
-    uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
     with:
       method: oidc
       identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -120,7 +120,7 @@ steps:
 
   # 2. Project-specific second — overrides any collisions from shared
   - name: Load app secrets from Infisical (OIDC)
-    uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
     with:
       method: oidc
       identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -137,7 +137,7 @@ If you only need keys at the **root** of the shared project (i.e. you don't need
 
 ```yaml
 - id: load
-  uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
   with:
     project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
     environment: prod
@@ -157,7 +157,7 @@ Renders the entire Infisical folder to a bare `KEY=value` file — no quote-wrap
 
 ```yaml
 - id: load
-  uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
   with:
     method: oidc
     identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}

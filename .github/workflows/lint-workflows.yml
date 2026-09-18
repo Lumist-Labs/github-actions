@@ -15,7 +15,7 @@ name: Lint workflows
 # This repo warrants it more than any consumer: a mistake here ships to every
 # repo pinned to @v2 at once, and reusable workflows get no other validation.
 #
-# Hosted on purpose, per aretecp/github-actions#116 -- it is seconds long and
+# Hosted on purpose, per Lumist-Labs/github-actions#116 -- it is seconds long and
 # has no cache to warm.
 
 on:

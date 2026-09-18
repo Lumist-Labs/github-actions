@@ -31,7 +31,7 @@ For admin / local-execution scripts run by a maintainer, see [`../tools/`](../to
 
 ```yaml
 - name: Wait for healthy
-  uses: aretecp/github-actions/actions/wait-for-healthy@v2
+  uses: Lumist-Labs/github-actions/actions/wait-for-healthy@v2
   with:
     host: ${{ env.VPS_TAILSCALE_IP }}
     username: ${{ inputs.vps-user }}
@@ -54,7 +54,7 @@ hands them to `docker compose logs` if the wait times out.
 scripts/install-docker-prune.sh
 
 # Or standalone
-curl -fsSL "https://raw.githubusercontent.com/aretecp/github-actions/v2/scripts/install-docker-prune.sh" | bash
+curl -fsSL "https://raw.githubusercontent.com/Lumist-Labs/github-actions/v2/scripts/install-docker-prune.sh" | bash
 ```
 
 It exists because on 2026-08-14 the Areté VPS Docker data-root volume filled to
@@ -100,9 +100,9 @@ Pick the ref that matches your trust + reproducibility tradeoff:
 
 | Pin | Use when |
 |---|---|
-| `https://raw.githubusercontent.com/aretecp/github-actions/v1/scripts/...` | Default. Get patch fixes automatically. |
-| `https://raw.githubusercontent.com/aretecp/github-actions/v1.2.3/scripts/...` | You want exact reproducibility but can manually upgrade |
-| `https://raw.githubusercontent.com/aretecp/github-actions/<full-sha>/scripts/...` | Strict — security-sensitive workflows |
+| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v1/scripts/...` | Default. Get patch fixes automatically. |
+| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v1.2.3/scripts/...` | You want exact reproducibility but can manually upgrade |
+| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/<full-sha>/scripts/...` | Strict — security-sensitive workflows |
 
 ## Why a script, wrapped in an action
 

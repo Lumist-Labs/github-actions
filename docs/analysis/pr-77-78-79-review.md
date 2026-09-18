@@ -13,8 +13,8 @@ this repo (`base_branch: main` in `AGENTS.md`, and history shows feature→main)
 > | rust-tauri baked components target the wrong toolchain (§3) | **Fixed independently** by `#80`, same conclusion, verified differently (`rustup run stable cargo clippy --version` vs the default toolchain's). |
 > | `git` on the omarchy host (§5) | **Obsolete — I reviewed a stale diff.** The merged workflow runs on `ubuntu-latest`, not `[self-hosted, omarchy]`, with an added comment explaining why it must: this repo is PUBLIC and the org runner group sets `allows_public_repositories: false`, so a self-hosted job here queues forever. There is no omarchy host in the path. |
 > | `DOCKER_CONFIG` under `/tmp` on a shared runner (§10) | **Obsolete, same reason.** `DOCKER_CONFIG` was removed entirely before merge; the hosted runner is ephemeral and cleanup is now just `docker logout`. |
-> | **`MIX_HOME`/`HEX_HOME` (§1)** | **Was live on `main`.** Fixed in `aretecp/github-actions#83`. |
-> | **Smoke blind spot + rebar tautology (§2)** | **Was live on `main`.** Fixed in `aretecp/github-actions#83`. |
+> | **`MIX_HOME`/`HEX_HOME` (§1)** | **Was live on `main`.** Fixed in `Lumist-Labs/github-actions#83`. |
+> | **Smoke blind spot + rebar tautology (§2)** | **Was live on `main`.** Fixed in `Lumist-Labs/github-actions#83`. |
 > | `$HOME` build-time guard (long-term item 4) | **Deferred, not in `#83`.** A naive `find /root -mindepth 1` guard fails on the images as built: the patched `ci-elixir:1.18.4-otp-27` still leaves 16 entries under `/root` — `.bashrc` and `.profile` from the base image, `.cache/uv`, `.config/uv/uv-receipt.json`, and a `/root/.local/bin/python3.12` shim that `uv python install` writes regardless of `UV_PYTHON_INSTALL_DIR`. The guard needs a curated allow-list, which is design work; it should not delay the MIX_HOME fix. |
 > | Concurrency key, `timeout-minutes`, arch-pinned libpq, README tense (§8–11) | Not done. Low priority; see `pr-77-78-79-fixes.md` §A1.4. |
 >
@@ -80,7 +80,7 @@ into a review.
 
 The working recipe: enumerate non-archived repos → for each, enumerate `main`/`master`/`develop` →
 `git/trees?recursive=1` for workflow paths → fetch each with retries → grep for
-`aretecp/github-actions/...@ref`. Assert the failure log is empty before trusting the result.
+`Lumist-Labs/github-actions/...@ref`. Assert the failure log is empty before trusting the result.
 
 ---
 

@@ -1,6 +1,6 @@
 # Runbook: Infisical machine identity for shared GitHub Actions
 
-How the `aretecp/github-actions` shared actions authenticate to Infisical, and how to rotate, scope, or expand access. Owned by the platform team.
+How the `Lumist-Labs/github-actions` shared actions authenticate to Infisical, and how to rotate, scope, or expand access. Owned by the platform team.
 
 ## Background
 

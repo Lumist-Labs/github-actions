@@ -55,7 +55,7 @@ body:
       description: The relevant `uses:` block and any inputs/env you passed. Redact secrets.
       render: yaml
       placeholder: |
-        - uses: aretecp/github-actions/actions/load-infisical-secrets@v1
+        - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
           with:
             project-id: ${{ vars.INFISICAL_PROJECT_ID }}
             environment: prod

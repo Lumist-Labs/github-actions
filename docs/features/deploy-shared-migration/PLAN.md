@@ -17,7 +17,7 @@ bypassing our SHA-pinned `tailscale-connect` wrapper.
 
 That bypass is not theoretical. `contact-intelligence` prod deploy has been **broken since
 2026-05-19** with a dead `TAILSCALE_AUTHKEY`, and the silent-success bug in the upstream action
-disguised it as an SSH timeout (see aretecp/github-actions#68, and contact-intelligence#78).
+disguised it as an SSH timeout (see Lumist-Labs/github-actions#68, and contact-intelligence#78).
 
 ### Scope
 
@@ -64,7 +64,7 @@ variable. Areté uses **repo-level** variables, not org-level (see
 Cheap to fix (`gh variable set`, repo admin is enough), and verifiable with a throwaway
 push-triggered probe before trusting it.
 
-### P3 — Merge aretecp/github-actions#68
+### P3 — Merge Lumist-Labs/github-actions#68
 
 Hardens `tailscale-connect` to fail when it never joins the tailnet, and bumps the internal
 `tailscale-connect@v1` → `@v2` pins so the fix actually reaches `vps-deploy-core`. Landing this

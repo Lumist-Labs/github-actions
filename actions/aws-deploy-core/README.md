@@ -38,7 +38,7 @@ steps:
     with: { node-version: 20, cache: npm }
   - run: npm ci && npm run build          # the caller builds
 
-  - uses: aretecp/github-actions/actions/aws-deploy-core@v2
+  - uses: Lumist-Labs/github-actions/actions/aws-deploy-core@v2
     with:
       target: s3-cloudfront
       aws-role-arn: ${{ secrets.AWS_ROLE_ARN }}
@@ -54,7 +54,7 @@ auth key to hold, no inbound port to open, and no long-lived credential anywhere
 in the path.
 
 ```yaml
-  - uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+  - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
     id: env
     with:
       method: oidc
@@ -65,7 +65,7 @@ in the path.
       export-as-env: dotenv
       dotenv-output-path: ${{ runner.temp }}/.env
 
-  - uses: aretecp/github-actions/actions/aws-deploy-core@v2
+  - uses: Lumist-Labs/github-actions/actions/aws-deploy-core@v2
     with:
       target: ec2-compose
       aws-role-arn: ${{ vars.LUMIOS_DEPLOY_ROLE_ARN }}
@@ -141,7 +141,7 @@ migration task, updates the service, waits for it to stabilize, then
 optionally runs a post-deploy task and a healthcheck.
 
 ```yaml
-  - uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+  - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
     id: env
     with:
       method: oidc
@@ -152,7 +152,7 @@ optionally runs a post-deploy task and a healthcheck.
       export-as-env: dotenv
       dotenv-output-path: ${{ runner.temp }}/.env
 
-  - uses: aretecp/github-actions/actions/aws-deploy-core@v2
+  - uses: Lumist-Labs/github-actions/actions/aws-deploy-core@v2
     with:
       target: ecs-service
       aws-role-arn: ${{ vars.SEXTANT_DEPLOY_ROLE_ARN }}

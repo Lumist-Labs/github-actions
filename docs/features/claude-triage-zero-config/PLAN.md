@@ -83,7 +83,7 @@ permissions:
 
 jobs:
   triage:
-    uses: aretecp/github-actions/.github/workflows/claude-issue-triage.yml@v2
+    uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-triage.yml@v2
 ```
 
 Everything left is irreducible GHA structure: triggers must live in the caller, and a caller's
@@ -114,7 +114,7 @@ that convention is about merge flow.
 ```yaml
 - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
   if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
-  uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
   with:
     method: oidc
     identity-id:  ${{ inputs.infisical-identity-id  || vars.INFISICAL_OIDC_IDENTITY_ID }}

@@ -229,7 +229,7 @@ inputs:
     required: false
     default: ''
 
-# Every sibling action below is referenced as `aretecp/github-actions/...@v2`,
+# Every sibling action below is referenced as `Lumist-Labs/github-actions/...@v2`,
 # never `./actions/...`, and the org name here is not an oversight.
 #
 # Inside a composite action a `./` path resolves against the CALLER's workspace,
@@ -251,7 +251,7 @@ runs:
     # ── 1. Render app dotenv ─────────────────────────────────────────────────
     - name: Load app secrets from Infisical (dotenv mode)
       id: load-app-secrets
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -271,7 +271,7 @@ runs:
     - name: Load extra shared folder 1 (dotenv mode)
       id: extra-1
       if: ${{ inputs.extra-shared-path-1 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -286,7 +286,7 @@ runs:
     - name: Load extra shared folder 2 (dotenv mode)
       id: extra-2
       if: ${{ inputs.extra-shared-path-2 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -301,7 +301,7 @@ runs:
     - name: Load extra shared folder 3 (dotenv mode)
       id: extra-3
       if: ${{ inputs.extra-shared-path-3 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -316,7 +316,7 @@ runs:
     - name: Load extra app folder 1 (dotenv mode)
       id: extra-app-1
       if: ${{ inputs.extra-app-path-1 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -331,7 +331,7 @@ runs:
     - name: Load extra app folder 2 (dotenv mode)
       id: extra-app-2
       if: ${{ inputs.extra-app-path-2 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -346,7 +346,7 @@ runs:
     - name: Load extra app folder 3 (dotenv mode)
       id: extra-app-3
       if: ${{ inputs.extra-app-path-3 != '' }}
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -442,7 +442,7 @@ runs:
 
     # ── 2. Infra creds + Tailscale ───────────────────────────────────────────
     - name: Load infra secrets from Infisical (env mode)
-      uses: aretecp/github-actions/actions/load-infisical-secrets@v2
+      uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
       with:
         method: oidc
         identity-id: ${{ inputs.infisical-identity-id }}
@@ -456,7 +456,7 @@ runs:
         export-as-env: 'true'
 
     - name: Connect to Tailscale
-      uses: aretecp/github-actions/actions/tailscale-connect@v2
+      uses: Lumist-Labs/github-actions/actions/tailscale-connect@v2
       with:
         authkey: ${{ env.TAILSCALE_AUTHKEY }}
 
@@ -788,7 +788,7 @@ runs:
       # this action still calls @v2, so the change is only exercised once it is
       # tagged. Cut a pre-release (release.yml, major-tag update unchecked) and
       # point one consumer at it — do not assume a green lint covers it.
-      uses: aretecp/github-actions/actions/wait-for-healthy@v2
+      uses: Lumist-Labs/github-actions/actions/wait-for-healthy@v2
       with:
         host: ${{ env.VPS_TAILSCALE_IP }}
         username: ${{ inputs.vps-user }}

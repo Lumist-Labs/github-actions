@@ -84,7 +84,7 @@ on:
         default: ''
       shared-ref:
         description: >-
-          Ref of aretecp/github-actions to pull the system prompt from.
+          Ref of Lumist-Labs/github-actions to pull the system prompt from.
           MUST track this workflow's own major tag — it defaulted to `v1` while
           consumers called `@v2`, so they ran v2 logic against a frozen v1
           prompt. Bump this default in lockstep with every major release.
@@ -175,7 +175,7 @@ jobs:
       - name: Checkout shared workflow assets (for system prompt)
         uses: actions/checkout@v4
         with:
-          repository: aretecp/github-actions
+          repository: Lumist-Labs/github-actions
           # Public repo, so no token needed. See the shared-ref input: this must
           # track the workflow's own major tag.
           ref: ${{ inputs.shared-ref }}

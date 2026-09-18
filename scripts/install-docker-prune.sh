@@ -19,7 +19,7 @@
 #   scripts/install-docker-prune.sh
 #
 # Usage, standalone (fetches docker-prune.sh from SOURCE_REF):
-#   curl -fsSL "https://raw.githubusercontent.com/aretecp/github-actions/v2/scripts/install-docker-prune.sh" | bash
+#   curl -fsSL "https://raw.githubusercontent.com/Lumist-Labs/github-actions/v2/scripts/install-docker-prune.sh" | bash
 #
 # Environment variables (all optional):
 #   INSTALL_DIR   — where docker-prune.sh lands (default $HOME/bin)
@@ -79,7 +79,7 @@ else
   TMP="$(mktemp)"
   trap 'rm -f "$TMP"' EXIT
   curl -fsSL \
-    "https://raw.githubusercontent.com/aretecp/github-actions/${SOURCE_REF}/scripts/docker-prune.sh" \
+    "https://raw.githubusercontent.com/Lumist-Labs/github-actions/${SOURCE_REF}/scripts/docker-prune.sh" \
     -o "$TMP"
   install -m 0755 "$TMP" "$TARGET"
 fi
@@ -139,7 +139,7 @@ install_systemd() {
   sudo tee /etc/systemd/system/docker-prune.service >/dev/null <<UNIT
 [Unit]
 Description=Reclaim Docker disk and report usage against a threshold
-Documentation=https://github.com/aretecp/github-actions/blob/main/scripts/README.md
+Documentation=https://github.com/Lumist-Labs/github-actions/blob/main/scripts/README.md
 After=docker.service
 Wants=docker.service
 OnFailure=docker-prune-failed.service

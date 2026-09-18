@@ -2,7 +2,7 @@
 
 Where a job runs, why, and the traps on the self-hosted host. Written 2026-08-26
 after a migration to that host broke two release pipelines and caused a
-production outage. Decision record: [#116](https://github.com/aretecp/github-actions/issues/116).
+production outage. Decision record: [#116](https://github.com/Lumist-Labs/github-actions/issues/116).
 
 ## The rule
 
