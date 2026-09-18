@@ -471,11 +471,12 @@ runs:
         REF: ${{ inputs.ref }}
         ALLOW_CLONE: ${{ inputs.allow-clone }}
         GH_TOKEN: ${{ inputs.github-token }}
+        EXPECTED_REPO: ${{ github.repository }}
       with:
         host: ${{ env.VPS_TAILSCALE_IP }}
         username: ${{ inputs.vps-user }}
         key: ${{ env.VPS_SSH_KEY }}
-        envs: REPO_DIR,REPO_URL,REF,ALLOW_CLONE,GH_TOKEN
+        envs: REPO_DIR,REPO_URL,REF,ALLOW_CLONE,GH_TOKEN,EXPECTED_REPO
         script: |
           set -euo pipefail
 
@@ -533,6 +534,40 @@ runs:
           fi
 
           cd "$REPO_DIR"
+
+          # A VPS checkout outlives an org move; its remote does not follow one.
+          # GitHub redirects a transferred repo for the web and for `uses:`, but
+          # a private repo fetched with a token scoped elsewhere just gets
+          # "Repository not found" — which reads like a deleted repo or a bad
+          # credential, not a rename. litellm-gateway's edge deploy died exactly
+          # that way the first time it ran after moving to Lumist-Labs.
+          #
+          # github.repository is the calling repo, so it is right by construction
+          # and needs no new input. Only the owner/name is rewritten and the
+          # scheme is kept: some boxes were switched to git@ by hand years ago
+          # (see the credential-helper note above), and forcing them onto https
+          # would hand them a fetch they have no credential for.
+          CUR_URL=$(git remote get-url origin 2>/dev/null || echo "")
+          # Match the host explicitly. Deciding "is this GitHub?" from whether a
+          # sed stripped anything is wrong: `.git` alone satisfies that, and a
+          # self-hosted remote like https://git.internal/foo/bar.git would then
+          # be rewritten to github.com — silently repointing a box at the wrong
+          # server. Anything not on github.com is left alone, including the
+          # ssh://git@github.com/ form: no box here uses it, and failing the
+          # way it does today beats an untested rewrite of a live remote.
+          case "$CUR_URL" in
+            https://github.com/*) NEW_URL="https://github.com/$EXPECTED_REPO.git" ;;
+            git@github.com:*)     NEW_URL="git@github.com:$EXPECTED_REPO.git" ;;
+            *)                    NEW_URL="" ;;
+          esac
+          if [ -n "$NEW_URL" ]; then
+            CUR_PATH=$(printf '%s' "$CUR_URL" | sed -E 's#^https://github\.com/##; s#^git@github\.com:##; s#\.git$##')
+            if [ "$(printf '%s' "$CUR_PATH" | tr 'A-Z' 'a-z')" != "$(printf '%s' "$EXPECTED_REPO" | tr 'A-Z' 'a-z')" ]; then
+              echo "origin is '$CUR_PATH' but this repo is '$EXPECTED_REPO' — repointing to $NEW_URL"
+              git remote set-url origin "$NEW_URL"
+            fi
+          fi
+
           echo "Fetching and checking out $REF..."
           # Explicit all-branches refspec so single-branch clones (fetch refspec
           # pinned to one branch, e.g. a --single-branch clone) still pull
