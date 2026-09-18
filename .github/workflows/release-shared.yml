@@ -2,7 +2,7 @@ name: Release (shared)
 
 # Reusable release workflow for Areté consumer repos. Each consumer's
 # .github/workflows/release.yml becomes a thin shim that calls this with
-# `uses: aretecp/github-actions/.github/workflows/release-shared.yml@v1`.
+# `uses: Lumist-Labs/github-actions/.github/workflows/release-shared.yml@v1`.
 #
 # Behavior:
 #   1. Promote a conventional-commit-style trigger commit if a squash-merge

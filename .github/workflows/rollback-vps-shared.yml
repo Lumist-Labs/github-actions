@@ -501,7 +501,7 @@ jobs:
       # -----------------------------------------------------------------------
 
       - name: Deploy (rollback) via vps-deploy-core
-        uses: aretecp/github-actions/actions/vps-deploy-core@v2
+        uses: Lumist-Labs/github-actions/actions/vps-deploy-core@v2
         with:
           infisical-identity-id: ${{ inputs.infisical-identity-id }}
           shared-project-slug: ${{ inputs.shared-project-slug }}

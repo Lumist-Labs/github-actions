@@ -3,7 +3,7 @@ name: Deploy to VPS (shared)
 # Reusable deploy workflow for Areté consumer repos that deploy to a
 # Tailscale-reachable VPS via Docker Compose. Each consumer's deploy workflow
 # becomes a thin shim that calls this with:
-#   uses: aretecp/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+#   uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
 #
 # Behavior:
 #   1. Load the app Infisical folder in dotenv mode → render a bare KEY=value
@@ -416,7 +416,7 @@ jobs:
         #
         # So: any future validation must revert this line before merge, and that
         # hazard is tracked rather than left to a comment nobody reads.
-        uses: aretecp/github-actions/actions/vps-deploy-core@v2
+        uses: Lumist-Labs/github-actions/actions/vps-deploy-core@v2
         with:
           infisical-identity-id: ${{ inputs.infisical-identity-id }}
           shared-project-slug: ${{ inputs.shared-project-slug }}
