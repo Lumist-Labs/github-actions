@@ -2,7 +2,7 @@ name: Assert Prod Deployer
 description: >-
   Fail unless github.triggering_actor is in the org variable PROD_DEPLOYERS
   (a JSON list managed by lumist-terraform-infrastructure/github/actions.tf).
-  First step of every job that deploys, rolls back or copies prod.
+  Enforced in Lumist-Labs repos only. First step of every job that deploys, rolls back or copies prod.
 
 inputs:
   deployers:
@@ -16,9 +16,20 @@ runs:
       env:
         DEPLOYERS: ${{ inputs.deployers }}
         ACTOR: ${{ github.triggering_actor }}
+        OWNER: ${{ github.repository_owner }}
       run: |
+        # PROD_DEPLOYERS and the core team exist only in Lumist-Labs. aretecp repos
+        # (bd-pulse, areteos, contact-intelligence) call these same workflows.
+        if [[ "$OWNER" != "Lumist-Labs" ]]; then
+          echo "::notice::Prod deployer check not enforced for $OWNER repos; $ACTOR deploying."
+          exit 0
+        fi
         if [[ -z "$DEPLOYERS" ]]; then
           echo "::error::PROD_DEPLOYERS is empty or not visible to this repo." >&2
+          exit 1
+        fi
+        if ! jq -e 'type == "array"' <<<"$DEPLOYERS" >/dev/null 2>&1; then
+          echo "::error::PROD_DEPLOYERS is not a JSON array: $DEPLOYERS" >&2
           exit 1
         fi
         if ! jq -e --arg a "$ACTOR" 'index($a) != null' <<<"$DEPLOYERS" >/dev/null; then

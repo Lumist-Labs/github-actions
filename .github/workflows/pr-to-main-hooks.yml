@@ -529,7 +529,9 @@ jobs:
           echo "Updated PR #${PR_NUMBER}"
 
       - name: Request review from core
+        # The core team exists only in Lumist-Labs.
         if: |
+          github.repository_owner == 'Lumist-Labs' &&
           !github.event.pull_request.draft &&
           (github.event.action == 'opened' || github.event.action == 'ready_for_review')
         # A missed review request must not stop the Teams card; the failure still
