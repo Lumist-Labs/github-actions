@@ -14,8 +14,9 @@ name: PR to main — hooks (shared)
 # contain it. The frozen-`@v1` policy in README applies to
 # `load-infisical-secrets` only, not to reusable workflows.
 #
-# Reviewers are NOT auto-assigned — the PR author requests reviews
-# manually so we can match the right person to the change.
+# Review is requested from the `core` team on open / ready. Not required for
+# core-authored PRs (the main ruleset lets core merge without an approval); for
+# anyone else the ruleset already requires an approval and a core merge.
 #
 # The Teams card runs LAST so it sees the auto-generated PR body, not the
 # original empty / placeholder one. Step 4 skips drafts and skips
@@ -526,6 +527,19 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --body-file /tmp/pr-body.txt
 
           echo "Updated PR #${PR_NUMBER}"
+
+      - name: Request review from core
+        if: |
+          !github.event.pull_request.draft &&
+          (github.event.action == 'opened' || github.event.action == 'ready_for_review')
+        # A missed review request must not stop the Teams card; the failure still
+        # shows as a warning on the run.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" -f 'team_reviewers[]=core' --silent
 
       - name: Post to Teams (with auto-generated PR body)
         # Same gating as the reviewer step — fires once on PR open / ready,
