@@ -2,7 +2,7 @@ name: Release (shared)
 
 # Reusable release workflow for Areté consumer repos. Each consumer's
 # .github/workflows/release.yml becomes a thin shim that calls this with
-# `uses: Lumist-Labs/github-actions/.github/workflows/release-shared.yml@v1`.
+# `uses: Lumist-Labs/github-actions/.github/workflows/release-shared.yml@v2`.
 #
 # Behavior:
 #   1. Promote a conventional-commit-style trigger commit if a squash-merge
@@ -59,6 +59,17 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+
+      ci-gated:
+        description: >-
+          Release only a main SHA that CI has passed. The caller triggers on
+          `workflow_run` of its CI workflow (branches: [main]). Trigger commits
+          are pushed without [skip ci] so CI runs on them, and the release waits
+          for that run's own workflow_run instead of tagging untested code.
+          CHANGELOG/git plugins are dropped so the tag lands on the tested SHA.
+        required: false
+        type: boolean
+        default: false
 # `cancel-in-progress: false` -- NEVER cancel a release. This job stages a
 # commit, pushes to main, waits on CI, then tags via semantic-release; killing
 # it partway can leave a staged commit on main with no tag, which is exactly the
@@ -70,6 +81,9 @@ concurrency:
 
 jobs:
   release:
+    if: >-
+      ${{ !inputs.ci-gated || github.event_name != 'workflow_run' ||
+          github.event.workflow_run.conclusion == 'success' }}
     runs-on: ${{ inputs.runner }}
     # setup-node below supplies node and npm, but npm still writes its cache
     # under $HOME -- and a self-hosted runner's HOME is frequently a directory
@@ -103,6 +117,18 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.bot.outputs.token }}
+          # workflow_run checks out the default branch otherwise, which is develop.
+          ref: ${{ inputs.ci-gated && 'main' || '' }}
+
+      - name: Verify CI tested this exact main SHA
+        if: inputs.ci-gated && github.event_name == 'workflow_run'
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [[ "$(git rev-parse HEAD)" != "$TESTED_SHA" ]]; then
+            echo "::error::main moved after CI tested $TESTED_SHA; the newer SHA releases on its own CI run." >&2
+            exit 1
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -111,16 +137,28 @@ jobs:
       - run: npm ci
 
       - name: Promote squash-merge commit type
+        id: promote
         env:
           MAJOR_BUMP: ${{ inputs.major }}
+          CI_GATED: ${{ inputs.ci-gated }}
         run: |
+          # Ungated: [skip ci] keeps the trigger commit from re-running CI, and it
+          # releases in this run. Gated: CI must run on it, and its workflow_run
+          # does the release -- this run stops after pushing.
+          SKIP=" [skip ci]"; [[ "$CI_GATED" == "true" ]] && SKIP=""
+          push_trigger() {
+            git push origin main
+            [[ "$CI_GATED" == "true" ]] && echo "deferred=true" >> "$GITHUB_OUTPUT"
+            return 0
+          }
+
           # Manual major bump via workflow_dispatch input
           if [[ "$MAJOR_BUMP" == "true" ]]; then
             echo "Manual major bump requested"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git commit --allow-empty -m "feat: major release [skip ci]" -m "BREAKING CHANGE: manual major version bump" --no-verify
-            git push origin main
+            git commit --allow-empty -m "feat: major release${SKIP}" -m "BREAKING CHANGE: manual major version bump" --no-verify
+            push_trigger
             exit 0
           fi
 
@@ -166,23 +204,34 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           if [[ -n "$BREAKING_FOOTER" ]]; then
-            git commit --allow-empty -m "${MSG} [skip ci]" -m "$BREAKING_FOOTER" --no-verify
+            git commit --allow-empty -m "${MSG}${SKIP}" -m "$BREAKING_FOOTER" --no-verify
           else
-            git commit --allow-empty -m "${MSG} [skip ci]" --no-verify
+            git commit --allow-empty -m "${MSG}${SKIP}" --no-verify
           fi
-          git push origin main
+          push_trigger
 
       - name: Get current latest tag
+        if: steps.promote.outputs.deferred != 'true'
         id: before
         run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
 
       - name: Run semantic-release
-        run: npx semantic-release
+        if: steps.promote.outputs.deferred != 'true'
         env:
+          CI_GATED: ${{ inputs.ci-gated }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # @semantic-release/git would commit (and tag) an untested CHANGELOG commit.
+          if [[ "$CI_GATED" == "true" ]]; then
+            jq '.plugins |= map(select((if type == "array" then .[0] else . end)
+              | IN("@semantic-release/changelog", "@semantic-release/git") | not))' \
+              .releaserc.json > "$RUNNER_TEMP/releaserc.json"
+            cp "$RUNNER_TEMP/releaserc.json" .releaserc.json
+          fi
+          npx semantic-release
 
       - name: Trigger production deploy if new release
-        if: inputs.deploy-workflow != ''
+        if: inputs.deploy-workflow != '' && steps.promote.outputs.deferred != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_WORKFLOW: ${{ inputs.deploy-workflow }}
