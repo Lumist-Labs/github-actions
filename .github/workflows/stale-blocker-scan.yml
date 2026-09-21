@@ -73,16 +73,30 @@ jobs:
           fi
 
           : > findings.txt
+          : > unreachable.txt
+          scanned=0
           for org in $ORGS; do
+            # A fine-grained PAT is scoped to ONE owner, so a token for org A
+            # cannot list org B. Say so rather than scanning nothing quietly —
+            # a scanner that skips half the fleet and reports "clean" is worse
+            # than no scanner.
+            if ! gh repo list "$org" --limit 1 >/dev/null 2>&1; then
+              echo "$org (whole org — token cannot list it)" >> unreachable.txt
+              continue
+            fi
             for repo in $(gh repo list "$org" --limit 200 --no-archived --json name --jq '.[].name'); do
               d=$(mktemp -d)
-              git clone -q --depth 1 --filter=blob:none --sparse \
-                "https://x-access-token:${GH_TOKEN}@github.com/$org/$repo.git" "$d" 2>/dev/null || { rm -rf "$d"; continue; }
+              if ! git clone -q --depth 1 --filter=blob:none --sparse \
+                   "https://x-access-token:${GH_TOKEN}@github.com/$org/$repo.git" "$d" 2>/dev/null; then
+                echo "$org/$repo" >> unreachable.txt; rm -rf "$d"; continue
+              fi
               git -C "$d" sparse-checkout set .github >/dev/null 2>&1
               [ -d "$d/.github" ] && python3 tools/stale-blocker-scan.py "$d/.github" "$org/$repo" >> findings.txt
+              scanned=$((scanned + 1))
               rm -rf "$d"
             done
           done
+          echo "scanned=$scanned" >> "$GITHUB_OUTPUT"
 
           python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json, os
@@ -93,8 +107,16 @@ jobs:
                   rows += json.loads(line)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f'count={len(rows)}\n')
+          unreachable = [l.strip() for l in open('unreachable.txt') if l.strip()]
+          if unreachable:
+              print('## Stale blocker scan — INCOMPLETE\n')
+              print(f'{len(unreachable)} target(s) could not be read, so this run does NOT')
+              print('clear them. Usually a fine-grained token scoped to one org only.\n')
+              for u in unreachable:
+                  print(f'- {u}')
+              print()
           if not rows:
-              print('## Stale blocker scan\n\nNothing found.')
+              print('## Stale blocker scan\n\nNothing found in what was scanned.')
           else:
               print('## Stale blocker scan\n')
               print(f'{len(rows)} comment(s) claim a blocker whose reference is closed.\n')
