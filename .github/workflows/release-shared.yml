@@ -130,6 +130,12 @@ jobs:
             exit 1
           fi
 
+      - name: Gated releases come from CI, not dispatch
+        if: inputs.ci-gated && github.event_name != 'workflow_run' && !inputs.major
+        run: |
+          echo "::error::ci-gated releases run from CI's workflow_run; dispatch only stages a forced major." >&2
+          exit 1
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
