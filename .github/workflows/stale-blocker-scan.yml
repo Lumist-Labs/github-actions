@@ -1,0 +1,153 @@
+name: Stale Blocker Scan
+
+# Weekly scan for comments that claim a blocker which no longer exists.
+#
+# Why this exists: on 2026-09-20 Lumist-Labs ran out of Actions minutes while 7
+# self-hosted runners sat idle. 43 jobs were still on billable `ubuntu-latest`
+# because comments in five repos read
+# `requires github-actions#113 (must merge + the v2 tag moved first)`. #113 had
+# merged months earlier. The blocker lifted, nobody swept back, and the only
+# record of the intent was a comment that had quietly stopped being true.
+#
+# Two other incidents that same week had the same shape: a `uses:` redirect
+# assumption written down as "works today, not a guarantee" and never retested,
+# and a repo excluded from a sweep with nothing tracking the exclusion.
+#
+# Design notes:
+#   * NOT a TODO grep. It joins each run of consecutive comment lines into one
+#     block, requires language that asserts *waiting on* something, extracts the
+#     issue/PR references, and asks GitHub whether they are still open. A closed
+#     reference under blocker language is the signal; a bare TODO is noise.
+#   * SILENT when clean — no issue, no notification, job summary only. Same rule
+#     as entra-secret-detector: a job that is green 51 weeks a year is a job
+#     nobody reads.
+#   * Read-only. It reports; it never edits a workflow.
+#
+# Schedule: Mondays 13:00 UTC — 9am ET in summer, 8am ET in winter. Start of the
+# week, so anything it surfaces has the week to get fixed.
+
+on:
+  schedule:
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+    inputs:
+      orgs:
+        description: 'Space-separated orgs to scan.'
+        required: false
+        type: string
+        default: 'aretecp Lumist-Labs'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: stale-blocker-scan
+  cancel-in-progress: false
+
+env:
+  ISSUE_LABEL: stale-blocker
+
+jobs:
+  scan:
+    # Hosted: this repo is public and the org runner group sets
+    # allows_public_repositories: false, so a self-hosted job here queues
+    # forever. Same constraint as ci-images.yml — do not "fix" it.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Scan both orgs
+        id: scan
+        env:
+          # Needs cross-org read. GITHUB_TOKEN is scoped to this repo alone, so
+          # it cannot list org repos or read another repo's workflows.
+          GH_TOKEN: ${{ secrets.FLEET_READ_TOKEN }}
+          ORGS: ${{ inputs.orgs || 'aretecp Lumist-Labs' }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::FLEET_READ_TOKEN is not set. This scan reads workflows across both orgs, which GITHUB_TOKEN cannot do — it is scoped to this repository. Create a fine-grained PAT with Contents:read + Metadata:read on aretecp and Lumist-Labs, and add it as an org secret named FLEET_READ_TOKEN."
+            exit 1
+          fi
+
+          : > findings.txt
+          : > unreachable.txt
+          scanned=0
+          for org in $ORGS; do
+            # A fine-grained PAT is scoped to ONE owner, so a token for org A
+            # cannot list org B. Say so rather than scanning nothing quietly —
+            # a scanner that skips half the fleet and reports "clean" is worse
+            # than no scanner.
+            if ! gh repo list "$org" --limit 1 >/dev/null 2>&1; then
+              echo "$org (whole org — token cannot list it)" >> unreachable.txt
+              continue
+            fi
+            for repo in $(gh repo list "$org" --limit 200 --no-archived --json name --jq '.[].name'); do
+              d=$(mktemp -d)
+              if ! git clone -q --depth 1 --filter=blob:none --sparse \
+                   "https://x-access-token:${GH_TOKEN}@github.com/$org/$repo.git" "$d" 2>/dev/null; then
+                echo "$org/$repo" >> unreachable.txt; rm -rf "$d"; continue
+              fi
+              git -C "$d" sparse-checkout set .github >/dev/null 2>&1
+              [ -d "$d/.github" ] && python3 tools/stale-blocker-scan.py "$d/.github" "$org/$repo" >> findings.txt
+              scanned=$((scanned + 1))
+              rm -rf "$d"
+            done
+          done
+          echo "scanned=$scanned" >> "$GITHUB_OUTPUT"
+
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          rows = []
+          for line in open('findings.txt'):
+              line = line.strip()
+              if line and line != '[]':
+                  rows += json.loads(line)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'count={len(rows)}\n')
+          unreachable = [l.strip() for l in open('unreachable.txt') if l.strip()]
+          if unreachable:
+              print('## Stale blocker scan — INCOMPLETE\n')
+              print(f'{len(unreachable)} target(s) could not be read, so this run does NOT')
+              print('clear them. Usually a fine-grained token scoped to one org only.\n')
+              for u in unreachable:
+                  print(f'- {u}')
+              print()
+          if not rows:
+              print('## Stale blocker scan\n\nNothing found in what was scanned.')
+          else:
+              print('## Stale blocker scan\n')
+              print(f'{len(rows)} comment(s) claim a blocker whose reference is closed.\n')
+              print('| Repo | File | Line | Ref | Comment |')
+              print('|---|---|---|---|---|')
+              for r in rows:
+                  print(f'| {r[0]} | `{r[1]}` | {r[2]} | {r[3]} | {r[4][:90]} |')
+          json.dump(rows, open('rows.json','w'))
+          PY
+
+      - name: Open or update the tracking issue
+        if: steps.scan.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          body=$(python3 - <<'PY'
+          import json
+          rows = json.load(open('rows.json'))
+          print("These comments say work is waiting on a reference that is now closed.")
+          print("Either the blocker lifted and the work was never done, or the comment is stale.\n")
+          print("| Repo | File | Line | Ref | Comment |")
+          print("|---|---|---|---|---|")
+          for r in rows:
+              print(f"| {r[0]} | `{r[1]}` | {r[2]} | {r[3]} | {r[4][:90]} |")
+          PY
+          )
+          existing=$(gh issue list -R "$GITHUB_REPOSITORY" --label "$ISSUE_LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --label "$ISSUE_LABEL" \
+              --title "Stale blocker comments across the fleet" --body "$body"
+          fi
