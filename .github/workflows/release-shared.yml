@@ -86,9 +86,23 @@ jobs:
       pull-requests: write
       actions: write
     steps:
+      # main is ruleset-protected and GITHUB_TOKEN can't be exempted, so git pushes
+      # (trigger commit, CHANGELOG commit, tag) go out as lumist-release-bot. The
+      # checkout-persisted auth header outranks the token semantic-release puts in
+      # its push URL, so this covers its pushes too. Its API calls keep
+      # GITHUB_TOKEN on purpose: a Release created by the App would fire
+      # `release: published` in deploy-prod on top of the dispatch below.
+      - id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.bot.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:

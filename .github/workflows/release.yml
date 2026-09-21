@@ -41,9 +41,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # v* tags are ruleset-protected; lumist-release-bot is the exempt actor.
+      - id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.bot.outputs.token }}
 
       - name: Determine version + skip
         id: version
