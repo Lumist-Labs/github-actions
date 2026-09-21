@@ -1,0 +1,28 @@
+name: Assert Prod Deployer
+description: >-
+  Fail unless github.triggering_actor is in the org variable PROD_DEPLOYERS
+  (a JSON list managed by lumist-terraform-infrastructure/github/actions.tf).
+  First step of every job that deploys, rolls back or copies prod.
+
+inputs:
+  deployers:
+    description: Pass `${{ vars.PROD_DEPLOYERS }}` -- composite actions can't read `vars`.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DEPLOYERS: ${{ inputs.deployers }}
+        ACTOR: ${{ github.triggering_actor }}
+      run: |
+        if [[ -z "$DEPLOYERS" ]]; then
+          echo "::error::PROD_DEPLOYERS is empty or not visible to this repo." >&2
+          exit 1
+        fi
+        if ! jq -e --arg a "$ACTOR" 'index($a) != null' <<<"$DEPLOYERS" >/dev/null; then
+          echo "::error::$ACTOR is not a prod deployer (PROD_DEPLOYERS: $DEPLOYERS)." >&2
+          exit 1
+        fi
+        echo "$ACTOR is a prod deployer"

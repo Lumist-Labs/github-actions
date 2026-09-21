@@ -404,6 +404,12 @@ jobs:
       contents: read
 
     steps:
+      - name: Only core can deploy, roll back or copy prod
+        if: contains(fromJSON('["prod", "production"]'), inputs.environment)
+        uses: Lumist-Labs/github-actions/actions/assert-prod-deployer@v2
+        with:
+          deployers: ${{ vars.PROD_DEPLOYERS }}
+
       - name: Deploy via vps-deploy-core
         # Pinned to the moving major tag, like every other consumer.
         #
