@@ -196,4 +196,6 @@ jobs:
           fi
 
           echo "New release: $LATEST_TAG (was $BEFORE_TAG) — triggering $DEPLOY_WORKFLOW"
-          gh workflow run "$DEPLOY_WORKFLOW" -f version="$LATEST_TAG"
+          # --ref main: without it the run lands on the repo's default branch, which
+          # is develop in most repos, and `production` only deploys from main or v*.
+          gh workflow run "$DEPLOY_WORKFLOW" --ref main -f version="$LATEST_TAG"
