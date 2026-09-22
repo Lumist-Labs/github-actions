@@ -1,0 +1,24 @@
+name: PR Hooks
+
+# This repo consuming its own reusable workflow. Same shim every other repo has:
+# retitle each PR `… → <base>`, and on PRs into main write the summary body,
+# link issues, request core review and post the Teams card.
+#
+# `@v2`, not a relative path: a reusable workflow `uses:` takes no expressions,
+# so this pins the released version like any other consumer. A change to
+# pr-to-main-hooks.yml is therefore only exercised here once it is tagged.
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+  id-token: write
+
+jobs:
+  hooks:
+    uses: Lumist-Labs/github-actions/.github/workflows/pr-to-main-hooks.yml@v2
