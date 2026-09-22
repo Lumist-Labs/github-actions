@@ -1,6 +1,6 @@
 # Areté Capital Partners — Shared GitHub Actions
 
-Reusable composite actions and workflows for `aretecp` repos. Drop-in `uses:` references with org defaults baked in — no copy-pasted workflow steps across repos.
+Reusable composite actions and workflows for `Lumist-Labs` repos (and the `aretecp` repos that still call them). Drop-in `uses:` references with org defaults baked in — no copy-pasted workflow steps across repos.
 
 ## Available composite actions
 
@@ -20,10 +20,10 @@ More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own compos
 
 | Workflow | Description | Status |
 |---|---|---|
-| [`release-shared.yml`](.github/workflows/release-shared.yml) | Squash-merge → conventional-commit promotion → semantic-release → optional deploy trigger | `v1` |
+| [`release-shared.yml`](.github/workflows/release-shared.yml) | Squash-merge → conventional-commit promotion → semantic-release → optional deploy trigger. `ci-gated: true` releases only a CI-passed SHA. | `v2` |
 | [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render Infisical folder → dotenv → write to VPS over ssh → docker compose up → healthcheck. Callers become ~15-line shims. | `v2` |
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Auto-triage of new issues / `@claude` comments via Claude Code. Bundled system prompt at `.claude/prompts/ci-triage.md`. Callers pass **no inputs at all** — see [zero-config shim](#zero-config-consumer-shim). | `v2` |
-| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | On PRs targeting `main`: gather context → Claude summary → update PR body + Closes #N footers → Teams card. | `v1` |
+| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. On PRs into `main`: Claude summary → PR body + Closes #N → request `core` review → Teams card. | `v2` |
 
 Reusable workflows are called via `jobs.<name>.uses: Lumist-Labs/github-actions/.github/workflows/<file>@v1` in the consumer repo. See the workflow file's header comments for inputs and prerequisites.
 
@@ -71,6 +71,39 @@ triage against something other than your default branch.
 > The CI key in `/github-actions` is deliberately separate from each app's own
 > `ANTHROPIC_API_KEY`. Apps keep theirs for runtime use; CI has its own so spend is attributable
 > and revocation is isolated.
+
+## New app checklist
+
+Everything a new repo needs to behave like the rest of the fleet. Org rulesets
+(`main`/`master` need a PR, `develop` can't be force-pushed or deleted, `v*` tags
+are core-only) apply the moment the repo exists — nothing to do for those.
+
+1. **Branches.** Create `develop` off `main` and make it the default. Work goes
+   feature → `develop` → `main`; `main` is production.
+2. **Repo variables.** `INFISICAL_INTERNAL_PROJECT_SLUG`,
+   `INFISICAL_SHARED_PROJECT_SLUG`, and `VPS_USER` if it deploys to the VPS.
+   `INFISICAL_OIDC_IDENTITY_ID`, `PROD_DEPLOYERS` and `RELEASE_BOT_APP_ID` are org
+   variables scoped to every repo — check with `gh variable list --repo <repo>`,
+   which shows inherited ones, before assuming.
+3. **Infisical folder.** `/<app>` in `lumist-labs-internal`, one set of values per
+   environment. Everything the app reads at runtime lives here — the deploy renders
+   `.env` from it, so a value hardcoded in a workflow is a value that will drift.
+4. **Release.** Copy a `release.yml` shim over
+   [`release-shared.yml`](.github/workflows/release-shared.yml), plus `.releaserc.json`
+   and a tooling-only `package.json` (see litellm-gateway). Releases push as
+   `lumist-release-bot`, which is what gets them past the `main` ruleset.
+5. **Deploy.** A shim over [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml).
+   An app that deploys itself (blue/green, say) passes `deploy-command`; work that
+   needs the new version running goes in `post-deploy-command`. AWS deploys are
+   per-app today — copy lumios or vector, and add the
+   [`assert-prod-deployer`](actions/assert-prod-deployer) step yourself.
+6. **PR hooks.** A shim over [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml),
+   triggered on PRs into `develop` and `main`.
+7. **Production environment.** If it deploys to prod, add the repo to
+   `local.production_repos` in `lumist-terraform-infrastructure/github/locals.tf`
+   so its `production` environment only deploys from `main` or a `v*` tag. `core`
+   team access and delete-branch-on-merge need no edit — they are keyed on every
+   non-archived repo — but they do wait for that module's next apply.
 
 ## CI base images ([`images/`](images))
 
