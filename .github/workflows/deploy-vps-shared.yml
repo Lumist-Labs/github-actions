@@ -229,6 +229,15 @@ on:
         default: ''
         type: string
 
+      post-deploy-command:
+        description: >-
+          Command run in `repo-dir` on the VPS after the containers are healthy,
+          for work that needs the new version running (lumilearn re-imports its
+          curriculum from the YAML in the new image).
+        required: false
+        default: ''
+        type: string
+
       deploy-command:
         description: >-
           Command run in `repo-dir` on the VPS instead of `compose up`, for an app
@@ -459,6 +468,7 @@ jobs:
           allow-clone: ${{ inputs.allow-clone }}
           healthcheck-containers: ${{ inputs.healthcheck-containers }}
           deploy-command: ${{ inputs.deploy-command }}
+          post-deploy-command: ${{ inputs.post-deploy-command }}
           required-keys: ${{ inputs.required-keys }}
           compose-force-recreate: ${{ inputs.compose-force-recreate }}
           db-type: ${{ inputs.db-type }}

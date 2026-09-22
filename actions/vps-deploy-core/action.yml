@@ -232,6 +232,14 @@ inputs:
     required: false
     default: ''
 
+  post-deploy-command:
+    description: >-
+      Optional command run in repo-dir on the VPS after the containers are
+      healthy, for work that needs a running app (lumilearn re-imports its
+      curriculum from the YAML baked into the new image).
+    required: false
+    default: ''
+
   pre-compose-up-script:
     description: >-
       Optional bash script run on the VPS after the env file is written (and the
@@ -834,3 +842,20 @@ runs:
         containers: ${{ inputs.healthcheck-containers }}
         compose-file: ${{ inputs.repo-dir }}/${{ inputs.compose-file }}
         env-file: ${{ inputs.repo-dir }}/${{ inputs.env-file-name }}
+
+    - name: Run post-deploy command on VPS
+      if: ${{ inputs.post-deploy-command != '' }}
+      uses: appleboy/ssh-action@v1.2.0
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        POST_DEPLOY_COMMAND: ${{ inputs.post-deploy-command }}
+      with:
+        host: ${{ env.VPS_TAILSCALE_IP }}
+        username: ${{ inputs.vps-user }}
+        key: ${{ env.VPS_SSH_KEY }}
+        envs: REPO_DIR,POST_DEPLOY_COMMAND
+        command_timeout: 15m
+        script: |
+          set -euo pipefail
+          cd "$REPO_DIR"
+          eval "$POST_DEPLOY_COMMAND"
