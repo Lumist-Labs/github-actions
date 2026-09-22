@@ -20,7 +20,7 @@ More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own compos
 
 | Workflow | Description | Status |
 |---|---|---|
-| [`release-shared.yml`](.github/workflows/release-shared.yml) | Squash-merge → conventional-commit promotion → semantic-release → optional deploy trigger | `v1` |
+| [`release-shared.yml`](.github/workflows/release-shared.yml) | Squash-merge → conventional-commit promotion → semantic-release → optional deploy trigger. `ci-gated: true` releases only a CI-passed SHA. | `v2` |
 | [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render Infisical folder → dotenv → write to VPS over ssh → docker compose up → healthcheck. Callers become ~15-line shims. | `v2` |
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Auto-triage of new issues / `@claude` comments via Claude Code. Bundled system prompt at `.claude/prompts/ci-triage.md`. Callers pass **no inputs at all** — see [zero-config shim](#zero-config-consumer-shim). | `v2` |
 | [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. On PRs into `main`: Claude summary → PR body + Closes #N → request `core` review → Teams card. | `v2` |
@@ -81,9 +81,10 @@ are core-only) apply the moment the repo exists — nothing to do for those.
 1. **Branches.** Create `develop` off `main` and make it the default. Work goes
    feature → `develop` → `main`; `main` is production.
 2. **Repo variables.** `INFISICAL_INTERNAL_PROJECT_SLUG`,
-   `INFISICAL_SHARED_PROJECT_SLUG` (`INFISICAL_OIDC_IDENTITY_ID` is org-wide, and
-   so are `PROD_DEPLOYERS` and `RELEASE_BOT_APP_ID`). `VPS_USER` if it deploys to
-   the VPS.
+   `INFISICAL_SHARED_PROJECT_SLUG`, and `VPS_USER` if it deploys to the VPS.
+   `INFISICAL_OIDC_IDENTITY_ID`, `PROD_DEPLOYERS` and `RELEASE_BOT_APP_ID` are org
+   variables scoped to every repo — check with `gh variable list --repo <repo>`,
+   which shows inherited ones, before assuming.
 3. **Infisical folder.** `/<app>` in `lumist-labs-internal`, one set of values per
    environment. Everything the app reads at runtime lives here — the deploy renders
    `.env` from it, so a value hardcoded in a workflow is a value that will drift.
@@ -98,10 +99,11 @@ are core-only) apply the moment the repo exists — nothing to do for those.
    [`assert-prod-deployer`](actions/assert-prod-deployer) step yourself.
 6. **PR hooks.** A shim over [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml),
    triggered on PRs into `develop` and `main`.
-7. **Production environment.** Add the repo to `local.production_repos` in
-   `lumist-terraform-infrastructure/github/locals.tf` so its `production`
-   environment only deploys from `main` or a `v*` tag. Team access and
-   delete-branch-on-merge land on that same apply.
+7. **Production environment.** If it deploys to prod, add the repo to
+   `local.production_repos` in `lumist-terraform-infrastructure/github/locals.tf`
+   so its `production` environment only deploys from `main` or a `v*` tag. `core`
+   team access and delete-branch-on-merge need no edit — they are keyed on every
+   non-archived repo — but they do wait for that module's next apply.
 
 ## CI base images ([`images/`](images))
 
