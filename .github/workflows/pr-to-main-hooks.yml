@@ -257,7 +257,8 @@ jobs:
 
           says_nothing=false
           case "$(echo "$subject" | tr '[:upper:]' '[:lower:]')" in
-            ''|develop|main|master|"merge branch"*|"merge pull request"*|"$HEAD_REF") says_nothing=true ;;
+            ''|develop|main|master|"merge branch"*|"merge pull request"*) says_nothing=true ;;
+            "$(echo "$HEAD_REF" | tr '[:upper:]' '[:lower:]')") says_nothing=true ;;
           esac
 
           if [ "$says_nothing" = true ]; then
@@ -625,6 +626,13 @@ jobs:
           WEBHOOK: ${{ env.TEAMS_PR_NOTIFY_WEBHOOK_URL || secrets.TEAMS_PR_NOTIFY_WEBHOOK_URL }}
         run: |
           set -euo pipefail
+
+          # A repo whose Infisical vars aren't wired up yet reaches here with an
+          # empty webhook, and curl would fail the whole job over a card.
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::No Teams webhook resolved — skipping the card. Set this repo's INFISICAL_* vars to get one."
+            exit 0
+          fi
 
           # Re-fetch the PR body so we get the AI-generated summary, not
           # the stale snapshot from when the workflow started.
