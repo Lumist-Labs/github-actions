@@ -1,10 +1,17 @@
-name: PR to main — hooks (shared)
+name: PR hooks (shared)
 
-# Reusable workflow that runs on PRs targeting `main`:
-#   1. Gather PR context (commits, diff, candidate issue references)
-#   2. Generate a Markdown summary via Claude
-#   3. Update the PR body with the summary + Closes #N footers
-#   4. Post a Teams card with the latest body (opened / ready_for_review only)
+# Reusable workflow for PRs targeting `develop`, `main` or `master`.
+#
+# Every base:
+#   1. Retitle: append ` → <base>`, and replace a title that says nothing
+#      ("Develop", a branch name, "Merge branch ...") with a ≤10-word summary.
+#
+# `main` / `master` only — a card and a Claude call per feature PR is noise:
+#   2. Gather PR context (commits, diff, candidate issue references)
+#   3. Generate a Markdown summary via Claude
+#   4. Update the PR body with the summary + Closes #N footers
+#   5. Request review from the `core` team
+#   6. Post a Teams card with the latest body (opened / ready_for_review only)
 #
 # Each consumer's `.github/workflows/pr-to-main-hooks.yml` becomes a thin
 # shim that calls this with `uses: Lumist-Labs/github-actions/.github/workflows/pr-to-main-hooks.yml@v2`.
@@ -228,7 +235,55 @@ jobs:
           # make it findable for the steps that actually invoke `claude`.
           echo "${{ github.workspace }}/.npm-global/bin" >> "$GITHUB_PATH"
 
+      # Runs for every base, unlike the summary and card below: a develop PR
+      # with a title like "Develop" is the same problem on a smaller scale.
+      # Only a title that says nothing is rewritten -- a hand-written one keeps
+      # its wording and just gains the arrow.
+      - name: Title says what it does and where it goes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLAUDE_MODEL: ${{ inputs.claude-model }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # Drop any arrow this workflow added before, so re-runs don't stack.
+          subject=${TITLE%% →*}
+          subject=$(echo "$subject" | sed -E 's/[[:space:]]+$//')
+
+          says_nothing=false
+          case "$(echo "$subject" | tr '[:upper:]' '[:lower:]')" in
+            ''|develop|main|master|"merge branch"*|"merge pull request"*) says_nothing=true ;;
+            "$(echo "$HEAD_REF" | tr '[:upper:]' '[:lower:]')") says_nothing=true ;;
+          esac
+
+          if [ "$says_nothing" = true ]; then
+            {
+              echo "Write a pull request title: at most 10 words, imperative mood,"
+              echo "no trailing period, no quotes, no branch names, no conventional-commit"
+              echo "prefix. Output the title alone. The commits are:"
+              echo
+              gh pr view "$PR_NUMBER" --repo "$REPO" --json commits \
+                --jq '.commits[].messageHeadline' | head -40
+            } > /tmp/title-prompt.txt
+
+            if claude --print --model "$CLAUDE_MODEL" --max-turns 1 \
+                 < /tmp/title-prompt.txt > /tmp/title.txt && [ -s /tmp/title.txt ]; then
+              subject=$(head -1 /tmp/title.txt | sed -E 's/^["'"'"']//; s/["'"'"']$//; s/\.$//')
+            else
+              echo "::warning::Could not generate a title; keeping '$subject'."
+            fi
+          fi
+
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --title "$subject → $BASE"
+          echo "Title: $subject → $BASE"
+
       - name: Gather PR context
+        if: contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref)
         id: context
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -367,6 +422,7 @@ jobs:
           git diff "${BASE}..${HEAD}" -- "${DIFF_EXCLUDES[@]}" > /tmp/full-diff.txt
 
       - name: Generate PR summary with Claude
+        if: contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref)
         env:
           # OIDC-loaded env.ANTHROPIC_API_KEY wins if present; falls back to
           # forwarded secret for callers that haven't migrated to OIDC yet.
@@ -465,6 +521,7 @@ jobs:
           fi
 
       - name: Update PR description
+        if: contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -531,6 +588,7 @@ jobs:
       - name: Request review from core
         # The core team exists only in Lumist-Labs.
         if: |
+          contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref) &&
           github.repository_owner == 'Lumist-Labs' &&
           !github.event.pull_request.draft &&
           (github.event.action == 'opened' || github.event.action == 'ready_for_review')
@@ -548,6 +606,7 @@ jobs:
         # not on every push. Runs AFTER the body update so the card text
         # reflects the AI-generated summary, not the user's placeholder.
         if: |
+          contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref) &&
           !github.event.pull_request.draft &&
           (github.event.action == 'opened' || github.event.action == 'ready_for_review')
         env:
@@ -567,6 +626,13 @@ jobs:
           WEBHOOK: ${{ env.TEAMS_PR_NOTIFY_WEBHOOK_URL || secrets.TEAMS_PR_NOTIFY_WEBHOOK_URL }}
         run: |
           set -euo pipefail
+
+          # A repo whose Infisical vars aren't wired up yet reaches here with an
+          # empty webhook, and curl would fail the whole job over a card.
+          if [ -z "$WEBHOOK" ]; then
+            echo "::warning::No Teams webhook resolved — skipping the card. Set this repo's INFISICAL_* vars to get one."
+            exit 0
+          fi
 
           # Re-fetch the PR body so we get the AI-generated summary, not
           # the stale snapshot from when the workflow started.
