@@ -15,8 +15,10 @@ name: Deploy to VPS (shared)
 #   4. Write the rendered env file to the VPS over ssh (base64 via ssh-action).
 #   5. allow-clone gate: dev may clone; prod refuses clone (requires existing
 #      checkout on the VPS).
-#   6. docker compose --env-file <env-file-name> up -d --pull always
-#   7. scripts/wait-for-healthy.sh over healthcheck-containers.
+#   6. docker compose --env-file <env-file-name> up -d --pull always, or
+#      deploy-command instead for an app that deploys itself.
+#   7. scripts/wait-for-healthy.sh over healthcheck-containers, when set.
+#   8. post-deploy-command, when set.
 #
 # All scaffolding is delegated to actions/vps-deploy-core — a composite that
 # rollback-vps-shared and copy-prod-db-shared also consume. The proven core
@@ -231,9 +233,11 @@ on:
 
       post-deploy-command:
         description: >-
-          Command run in `repo-dir` on the VPS after the containers are healthy,
-          for work that needs the new version running (lumilearn re-imports its
-          curriculum from the YAML in the new image).
+          Command run in `repo-dir` on the VPS last, for work that needs the new
+          version running (lumilearn re-imports its curriculum from the YAML in
+          the new image). It follows the healthcheck when `healthcheck-containers`
+          is set; with `deploy-command` alone, that command is what decides the
+          app is up.
         required: false
         default: ''
         type: string

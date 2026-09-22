@@ -234,9 +234,10 @@ inputs:
 
   post-deploy-command:
     description: >-
-      Optional command run in repo-dir on the VPS after the containers are
-      healthy, for work that needs a running app (lumilearn re-imports its
-      curriculum from the YAML baked into the new image).
+      Optional command run in repo-dir on the VPS last, for work that needs a
+      running app (lumilearn re-imports its curriculum from the YAML baked into
+      the new image). It follows the healthcheck when healthcheck-containers is
+      set; with deploy-command alone, that command is what decides the app is up.
     required: false
     default: ''
 
