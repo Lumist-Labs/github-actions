@@ -147,7 +147,9 @@ inputs:
     description: >-
       Space-separated list of Docker container names to pass to
       scripts/wait-for-healthy.sh. All listed containers must reach healthy status.
-    required: true
+      Required unless `deploy-command` is set.
+    required: false
+    default: ''
 
   required-keys:
     description: >-
@@ -220,6 +222,16 @@ inputs:
     required: false
     default: 'false'
 
+  deploy-command:
+    description: >-
+      Optional command run in repo-dir on the VPS INSTEAD of `compose up`, for apps
+      that deploy themselves (lumilearn's scripts/blue_green_deploy.sh flips colors
+      and health-checks each one). The env file, checkout and pre-deploy backup
+      still run first; the container healthcheck runs only if
+      healthcheck-containers is also set.
+    required: false
+    default: ''
+
   pre-compose-up-script:
     description: >-
       Optional bash script run on the VPS after the env file is written (and the
@@ -248,6 +260,13 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Check how this deploy is verified
+      if: ${{ inputs.deploy-command == '' && inputs.healthcheck-containers == '' }}
+      shell: bash
+      run: |
+        echo "::error::Set healthcheck-containers, or a deploy-command that health-checks itself." >&2
+        exit 1
+
     # ── 1. Render app dotenv ─────────────────────────────────────────────────
     - name: Load app secrets from Infisical (dotenv mode)
       id: load-app-secrets
@@ -747,6 +766,7 @@ runs:
 
     # ── 6. Compose up ────────────────────────────────────────────────────────
     - name: Docker Compose up on VPS
+      if: ${{ inputs.deploy-command == '' }}
       uses: appleboy/ssh-action@v1.2.0
       env:
         REPO_DIR: ${{ inputs.repo-dir }}
@@ -778,8 +798,26 @@ runs:
           fi
           docker compose --env-file "$ENV_FILE_NAME" -f "$COMPOSE_FILE" up "${UP_FLAGS[@]}"
 
+    - name: Run deploy command on VPS
+      if: ${{ inputs.deploy-command != '' }}
+      uses: appleboy/ssh-action@v1.2.0
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        DEPLOY_COMMAND: ${{ inputs.deploy-command }}
+      with:
+        host: ${{ env.VPS_TAILSCALE_IP }}
+        username: ${{ inputs.vps-user }}
+        key: ${{ env.VPS_SSH_KEY }}
+        envs: REPO_DIR,DEPLOY_COMMAND
+        command_timeout: ${{ inputs.compose-up-timeout }}
+        script: |
+          set -euo pipefail
+          cd "$REPO_DIR"
+          eval "$DEPLOY_COMMAND"
+
     # ── 7. Healthcheck ───────────────────────────────────────────────────────
     - name: Wait for containers to become healthy
+      if: ${{ inputs.healthcheck-containers != '' }}
       # Pinned to the moving major tag, like every other cross-action ref in
       # this repo. github.ref_name would resolve to the CALLER's ref inside a
       # reusable workflow (a consumer's develop), which does not exist here.

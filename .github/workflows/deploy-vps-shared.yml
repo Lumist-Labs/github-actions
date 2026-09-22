@@ -223,8 +223,20 @@ on:
         description: >-
           Space-separated list of Docker container names to pass to
           `scripts/wait-for-healthy.sh`. All listed containers must reach
-          `healthy` status before the job succeeds.
-        required: true
+          `healthy` status before the job succeeds. Required unless
+          `deploy-command` is set.
+        required: false
+        default: ''
+        type: string
+
+      deploy-command:
+        description: >-
+          Command run in `repo-dir` on the VPS instead of `compose up`, for an app
+          that deploys itself (lumilearn's blue/green script brings up the new
+          color, health-checks it, then flips traffic). Env file, checkout and the
+          optional pre-deploy backup still run first.
+        required: false
+        default: ''
         type: string
 
       required-keys:
@@ -446,6 +458,7 @@ jobs:
           ref: ${{ inputs.ref }}
           allow-clone: ${{ inputs.allow-clone }}
           healthcheck-containers: ${{ inputs.healthcheck-containers }}
+          deploy-command: ${{ inputs.deploy-command }}
           required-keys: ${{ inputs.required-keys }}
           compose-force-recreate: ${{ inputs.compose-force-recreate }}
           db-type: ${{ inputs.db-type }}
