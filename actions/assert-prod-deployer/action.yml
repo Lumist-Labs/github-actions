@@ -6,7 +6,7 @@ description: >-
 
 inputs:
   deployers:
-    description: Pass `${{ vars.PROD_DEPLOYERS }}` -- composite actions can't read `vars`.
+    description: The org variable PROD_DEPLOYERS, passed in by the caller (composite actions cannot read vars).
     required: true
 
 runs:
