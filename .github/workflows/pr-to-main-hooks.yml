@@ -205,6 +205,12 @@ jobs:
       # use site. Verified 2026-07-28 (beacon run 30369406219) that `vars`
       # resolve against the CALLER's repo inside a reusable workflow.
       - name: Load TEAMS_PR_NOTIFY_WEBHOOK_URL from Infisical (OIDC)
+        # A repo the Infisical identity's subject allowlist doesn't cover gets a
+        # 403 here. That costs the Teams card and the Claude summary, both of which
+        # already degrade with a warning -- it should not take the whole hook down,
+        # and the retitle step needs no secret at all. Add the repo to the identity
+        # in Infisical to get the card back.
+        continue-on-error: true
         if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
         uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
         with:
@@ -215,6 +221,12 @@ jobs:
           path: ${{ inputs.infisical-shared-path }}
 
       - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
+        # A repo the Infisical identity's subject allowlist doesn't cover gets a
+        # 403 here. That costs the Teams card and the Claude summary, both of which
+        # already degrade with a warning -- it should not take the whole hook down,
+        # and the retitle step needs no secret at all. Add the repo to the identity
+        # in Infisical to get the card back.
+        continue-on-error: true
         if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
         uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
         with:
