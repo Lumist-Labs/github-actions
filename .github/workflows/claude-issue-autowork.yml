@@ -632,6 +632,15 @@ jobs:
             echo "> on this pull request are the first verification it has had. Review it as"
             echo "> you would any other PR, and then some."
             echo ""
+            # In the BODY, not just the commit message, and outside the
+            # blockquote. Consumers that merge to a non-default branch close
+            # issues with a workflow that greps the PR body (areteos-py's
+            # close-issues-on-develop.yml) — a closing keyword that exists only
+            # in the commit is invisible to it, and the issue then sits open
+            # through its own completion. That has already cost this fleet a
+            # duplicated PR once.
+            echo "Closes #${ISSUE}"
+            echo ""
             cat /tmp/pr-body.md
           } > /tmp/pr-final.md
 
