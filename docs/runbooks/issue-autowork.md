@@ -1,58 +1,40 @@
 # Issue autowork
 
-`claude-issue-autowork.yml` lets a service account's small issues implement
-themselves. It scores every eligible issue, and for the ones that are genuinely
-trivial it opens a **draft** pull request. Nothing merges without a person, and
-nothing is verified before the PR exists — the PR's own CI is the first check the
-change gets.
+`claude-issue-autowork.yml` scores one issue in a target repo and, for the ones
+that are genuinely small, opens a **draft** pull request. Nothing merges without
+a person, and nothing is verified before the PR exists — the PR's own CI is the
+first check the change gets.
+
+Beacon runs it. Its dispatcher, `beacon/.github/workflows/autowork.yml`, is the
+only caller: Beacon dispatches it with `repo`, `issue` and `mode`, and the
+dispatcher looks up that repo's settings in `beacon/.github/autowork-repos.json`.
+Target repos carry no autowork files. Plan and rationale: beacon
+`docs/features/auto-dev-loop/CONNECTING.md`.
 
 This is a different job from [`claude-issue-triage.yml`](../../.github/workflows/claude-issue-triage.yml).
-Triage is advisory and runs on everything; autowork is a gate that authorizes an
-unsupervised change and runs only on an allowlist. They can both be installed in
-the same repo.
+Triage is advisory and runs in each repo on every issue; autowork authorizes an
+unsupervised change and runs only when Beacon asks.
 
-## Turning it on
+## Modes
 
-```yaml
-# .github/workflows/claude-autowork.yml
-name: Claude Autowork
-on:
-  issues:
-    types: [opened, labeled]
-permissions:
-  contents: read
-  issues: write
-  id-token: write
-jobs:
-  autowork:
-    uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-autowork.yml@v2
-    secrets: inherit
-    with:
-      runner: kenya
-      base-branch: develop
-      author-allowlist: areteintelligence
-```
+- `auto` — Beacon dispatches it on promote. The thresholds apply.
+- `override` — a Beacon admin's Autowork button. It waives size, confidence and
+  the model's own `review`. It never waives blocked paths, unparseable output,
+  invalid points, missing files or acceptance criteria, or a bad branch.
 
-Three things must exist in the consumer repo first, and the workflow fails with a
-named error if any is missing:
+Only Beacon holds a token that can dispatch, so admin rights live in Beacon and
+nowhere else.
 
-- `vars.RELEASE_BOT_APP_ID` and `secrets.RELEASE_BOT_PRIVATE_KEY`, with the App
-  **installed on the repo** and granted `contents: write` and
-  `pull-requests: write`. `secrets: inherit` is what forwards the private key.
-- `vars.INFISICAL_OIDC_IDENTITY_ID` and `vars.INFISICAL_INTERNAL_PROJECT_SLUG`,
-  the same pair triage uses.
-- The labels `autowork`, `autowork-queued`, `autowork-offered`, `autoworked` and
+## Adding a repo
+
+- Add it to `beacon/.github/autowork-repos.json` with its base branch, runner and
+  `blocked-paths`. Test the pattern against the repo's tree before relying on it.
+- Install `lumist-release-bot` on the repo with contents, pull-requests and
+  issues write. A repo in another org needs that org's own installation.
+- Create the labels `autowork-queued`, `autowork-offered`, `autoworked` and
   `needs-human`.
-
-Set `label-senders: LumistBot` so only Beacon can trigger by label. Beacon
-checks the admin role before it adds the label, so admin rights live in one
-place. From an allowed sender the label waives size, confidence and the model's
-own `review`. It never waives blocked paths, unparseable output, missing files
-or acceptance criteria, or a bad branch. A label from anyone else is removed
-with a comment.
-
-`author-allowlist` is the kill switch. Clearing it disables the on-open path
-entirely and leaves only the manual `autowork` label, without deleting the shim.
+- Confirm the repo's CI `pull_request` filter covers every `branch-prefixes`
+  entry.
 
 ## The App token is not optional
 
@@ -89,7 +71,7 @@ Confidence missing or unrecognised counts as low. These are hard stops, always
 | `points > offer-max-points`, or confidence low | The thresholds are the operator's call, not the model's |
 | any reported path matches `blocked-paths` | A model that was talked into `decision: "work"` cannot also talk its way past a regex |
 | no files, or no acceptance criteria | Nothing was actually authorized, and there is no definition of done |
-| branch prefix outside `branch-prefixes` | A prefix outside the consumer's CI branch filter gives the PR no checks, silently |
+| branch prefix outside `branch-prefixes` | A prefix outside the target repo's CI branch filter gives the PR no checks, silently |
 | branch missing the issue number | The repeat-run guard matches on it |
 | output was not parseable JSON | Fail closed |
 
@@ -102,10 +84,10 @@ two are both statements of intent and only the third is a fact.
 
 `blocked-paths` is broad on purpose: a false positive costs one human review, a
 false negative costs an unreviewed change to something load-bearing. Narrow it
-per consumer if it is catching too much, but narrow it deliberately.
+per repo if it is catching too much, but narrow it deliberately.
 
 It is matched **case-insensitively** at both enforcement points — `grep -iE` in
-the work job and `new RegExp(…, 'i')` in the verdict script — so keep consumer
+the work job and `new RegExp(…, 'i')` in the verdict script — so keep repo
 patterns lowercase. `audit` already catches `AdminAudit.tsx`, and writing
 `[Aa]udit` only makes the pattern look like it has to.
 
@@ -130,22 +112,22 @@ fix for the second.
 It has no toolchain and does not try to get one. `actions/setup-python` 404s on
 the self-hosted host (see [`runners-and-ci.md`](runners-and-ci.md)), so a
 toolchain step here is a reliable way to fail runs for reasons unrelated to the
-change. The consumer's CI is the real gate and it fires on the PR.
+change. The target repo's CI is the real gate and it fires on the PR.
 
 The cost is honest and stated in the PR body: nothing was verified before the
 push. If you want pre-push gates, containerize the `work` job in
-`ghcr.io/lumist-labs/ci-python-uv:3.12` the way the consumer's `ci.yml` does —
+`ghcr.io/lumist-labs/ci-python-uv:3.12` the way lumios's `ci.yml` does —
 that is the intended upgrade, not a rewrite.
 
 ## Re-running, and not running twice
 
 The `score` job stops before spending anything if the issue is already labelled
 `autoworked`, or if a branch matching `*/<issue#>-*` already exists on the
-remote. Either marker alone is enough — the label survives a deleted branch, the
+remote, or if the issue is closed. Either marker alone is enough — the label survives a deleted branch, the
 branch survives a stripped label.
 
 To deliberately re-run after editing an issue body: delete the branch, remove the
-`autoworked` label, and re-apply `autowork`.
+`autoworked` label, and trigger it again from Beacon.
 
 `cancel-in-progress` is **false** here, unlike triage. A cancel landing between
 `git push` and `gh pr create` leaves an orphan branch and no PR, which is worse
@@ -153,8 +135,8 @@ than a duplicate run the guard would have caught anyway.
 
 ## When a run fails
 
-The `work` job labels the issue `needs-human`, comments with the run URL, and
-leaves any pushed branch in place. A half-finished run must not sit there looking
+Both jobs label the issue `needs-human` and comment with the run URL. The `work`
+job leaves any pushed branch in place. A half-finished run must not sit there looking
 queued.
 
 ## Issue titles are untrusted input
