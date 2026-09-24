@@ -15,13 +15,18 @@
 // saying `review`; it can never talk its way past a blocked path, an unknown
 // branch prefix, or the point threshold.
 //
-// Reads from env: MAX_POINTS, BLOCKED_PATHS, BRANCH_PREFIXES, ISSUE,
-// GITHUB_OUTPUT.
+// Three outcomes: `work` runs now, `offer` waits for a Beacon admin, `review`
+// goes to a human. Anything that makes the change unsafe or unauthorized is a
+// hard stop and always `review`; only size and confidence can land on `offer`.
+//
+// Reads from env: MAX_POINTS, OFFER_MAX_POINTS, BLOCKED_PATHS, BRANCH_PREFIXES,
+// ISSUE, GITHUB_OUTPUT.
 
 const fs = require('fs');
 
 const [rawPath, verdictPath, commentPath] = process.argv.slice(2);
 const maxPoints = Number(process.env.MAX_POINTS || 2);
+const offerMaxPoints = Number(process.env.OFFER_MAX_POINTS || 3);
 const blocked = new RegExp(process.env.BLOCKED_PATHS || '(^alembic/)', 'i');
 const prefixes = (process.env.BRANCH_PREFIXES || 'feat|fix').split('|');
 const issue = process.env.ISSUE || '0';
@@ -47,40 +52,54 @@ try {
   parsed = {};
 }
 
-const points = Number.isFinite(Number(parsed.points)) ? Number(parsed.points) : 99;
+// Exact scale values only: Number(null), Number('') and Number(false) are all 0, which clears every threshold.
+const validPoints = [1, 2, 3, 5, 8, 13].includes(parsed.points);
+const points = validPoints ? parsed.points : 99;
 const files = Array.isArray(parsed.files) ? parsed.files.filter((f) => typeof f === 'string') : [];
 const acceptance = Array.isArray(parsed.acceptance) ? parsed.acceptance.filter((a) => typeof a === 'string') : [];
 const branch = typeof parsed.branch === 'string' ? parsed.branch.trim() : '';
 const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : '';
 const blockedReason = typeof parsed.blocked_reason === 'string' ? parsed.blocked_reason.trim() : '';
+// Missing or unrecognised reads as low, so a model that drops the field fails closed.
+const confidence = ['high', 'medium', 'low'].includes(parsed.confidence) ? parsed.confidence : 'low';
 
-// Every reason the decision can be `review`, collected so the comment can say
-// which one fired rather than just "no".
-const objections = [];
+// Collected rather than returned early, so the comment can list every one that
+// fired. `hard` always means review; `soft` alone means offer.
+const hard = [];
+const soft = [];
 
 if (parseError) {
-  objections.push(`the scoring pass did not return usable JSON (${parseError})`);
+  hard.push(`the scoring pass did not return usable JSON (${parseError})`);
 }
 if (parsed.decision !== 'work' && !blockedReason) {
-  objections.push(reason || 'the scoring pass chose human review');
+  hard.push(reason || 'the scoring pass chose human review');
 }
-if (points > maxPoints) {
-  objections.push(`scored ${points} points, above the ${maxPoints}-point autowork threshold`);
+if (!parseError && !validPoints) {
+  hard.push(`points ${JSON.stringify(parsed.points)} is not on the 1/2/3/5/8/13 scale`);
+} else if (points > offerMaxPoints) {
+  hard.push(`scored ${points} points, above the ${offerMaxPoints}-point offer threshold`);
+} else if (points > maxPoints) {
+  soft.push(`scored ${points} points, above the ${maxPoints}-point autowork threshold`);
+}
+if (confidence === 'low') {
+  hard.push('the scoring pass reported low confidence');
+} else if (confidence === 'medium') {
+  soft.push('the scoring pass reported medium confidence');
 }
 if (blockedReason) {
-  objections.push(`flagged as permanently unsuitable: ${blockedReason}`);
+  hard.push(`flagged as permanently unsuitable: ${blockedReason}`);
 }
 
 const hits = files.filter((f) => blocked.test(f));
 if (hits.length) {
-  objections.push(`touches protected paths — ${hits.join(', ')}`);
+  hard.push(`touches protected paths — ${hits.join(', ')}`);
 }
 
 if (!files.length) {
-  objections.push('the scoring pass named no files, so nothing was actually authorized');
+  hard.push('the scoring pass named no files, so nothing was actually authorized');
 }
 if (!acceptance.length) {
-  objections.push('no acceptance criteria, so there is no definition of done to implement against');
+  hard.push('no acceptance criteria, so there is no definition of done to implement against');
 }
 
 // A branch prefix outside the consumer's CI filter produces a PR with no checks
@@ -92,17 +111,24 @@ if (!acceptance.length) {
 // `decision=work` after ours and win.
 const prefix = branch.split('/')[0];
 if (!branch.includes('/') || !prefixes.includes(prefix)) {
-  objections.push(`branch "${branch || '(none)'}" is not one of ${prefixes.map((p) => p + "/…").join(", ")}, which would leave the PR without CI checks`);
+  hard.push(`branch "${branch || '(none)'}" is not one of ${prefixes.map((p) => p + "/…").join(", ")}, which would leave the PR without CI checks`);
 } else if (!new RegExp(`^[a-z]+/${issue}-[a-z0-9]+(-[a-z0-9]+)*$`).test(branch)) {
-  objections.push(`branch "${JSON.stringify(branch)}" is not \`${prefix}/${issue}-lowercase-kebab\`, which the repeat-run guard relies on`);
+  hard.push(`branch "${JSON.stringify(branch)}" is not \`${prefix}/${issue}-lowercase-kebab\`, which the repeat-run guard relies on`);
 }
 
-const decision = objections.length ? 'review' : 'work';
+const decision = hard.length ? 'review' : soft.length ? 'offer' : 'work';
+const objections = [...hard, ...soft];
 
 fs.writeFileSync(
   verdictPath,
-  JSON.stringify({ decision, points, branch, files, acceptance, reason, objections }, null, 2)
+  JSON.stringify({ decision, points, confidence, branch, files, acceptance, reason, objections }, null, 2)
 );
+
+const DECISION_TEXT = {
+  work: 'implement it — a draft PR is on the way',
+  offer: 'offered — waiting for a Beacon admin to start it',
+  review: 'human review',
+};
 
 const md = [];
 // Marker the work job greps for when it re-reads this comment as its brief.
@@ -111,9 +137,10 @@ md.push('### Autowork score');
 md.push('');
 md.push('| | |');
 md.push('|---|---|');
-md.push(`| **Points** | ${parseError ? '—' : points} |`);
-md.push(`| **Threshold** | ≤ ${maxPoints} |`);
-md.push(`| **Decision** | ${decision === 'work' ? 'implement it — a draft PR is on the way' : 'human review'} |`);
+md.push(`| **Points** | ${validPoints ? points : '—'} |`);
+md.push(`| **Confidence** | ${parseError ? '—' : confidence} |`);
+md.push(`| **Threshold** | ≤ ${maxPoints} automatic, ≤ ${offerMaxPoints} on offer |`);
+md.push(`| **Decision** | ${DECISION_TEXT[decision]} |`);
 if (decision === 'work') md.push(`| **Branch** | \`${branch}\` |`);
 md.push('');
 if (reason) {
@@ -138,6 +165,12 @@ if (decision === 'review') {
   objections.forEach((o) => md.push(`- ${o}`));
   md.push('');
   md.push(`Nothing has been changed. If you disagree, fix the issue body and re-apply the \`autowork\` label.`);
+} else if (decision === 'offer') {
+  md.push('**Why this is offered rather than automatic:**');
+  md.push('');
+  objections.forEach((o) => md.push(`- ${o}`));
+  md.push('');
+  md.push('Nothing protected is in scope. Nothing has been changed; a Beacon admin can start it.');
 } else {
   md.push('The pull request will be opened as a **draft** with no local verification — CI on it is the first real check.');
 }

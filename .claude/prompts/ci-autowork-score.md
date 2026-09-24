@@ -13,6 +13,7 @@ trailing commentary. The workflow parses your entire stdout as JSON.
 ```
 {
   "points": 1|2|3|5|8|13,
+  "confidence": "high" | "medium" | "low",
   "decision": "work" | "review",
   "reason": "one or two sentences, plain English, addressed to a human reviewer",
   "branch": "{type}/{issue#}-{short-desc}",
@@ -28,6 +29,12 @@ Field rules:
   change · **2** small, 1-2 files, straightforward · **3** a few files, some thinking ·
   **5** multiple files, cross-cutting · **8** complex or architectural · **13** epic,
   should be split.
+- `confidence` — how sure you are that `files` and `acceptance` are right and that the
+  change is what the reporter meant. **high**: you read the code and the fix is
+  unambiguous. **medium**: the fix is clear but you had to assume something about
+  intent, or couldn't confirm the root cause. **low**: you are guessing. Medium sends the
+  issue to an admin rather than straight to implementation, so use it honestly; it is
+  not a failure.
 - `branch` — the `{type}` segment MUST be one of `feat`, `feature`, `fix`, `refactor`,
   `chore`, `test`. Nothing else. Other prefixes exist but are not covered by consumer
   CI branch filters, so a PR on one would silently get no checks. `{short-desc}` is

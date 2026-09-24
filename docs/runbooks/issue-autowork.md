@@ -41,7 +41,8 @@ named error if any is missing:
   `pull-requests: write`. `secrets: inherit` is what forwards the private key.
 - `vars.INFISICAL_OIDC_IDENTITY_ID` and `vars.INFISICAL_INTERNAL_PROJECT_SLUG`,
   the same pair triage uses.
-- The labels `autowork`, `autowork-queued`, `autoworked` and `needs-human`.
+- The labels `autowork`, `autowork-queued`, `autowork-offered`, `autoworked` and
+  `needs-human`.
 
 `author-allowlist` is the kill switch. Clearing it disables the on-open path
 entirely and leaves only the manual `autowork` label, without deleting the shim.
@@ -65,11 +66,20 @@ and gets back strict JSON — points, decision, branch, the files it expects to
 touch, and the acceptance criteria. That JSON is then handed to
 [`scripts/autowork-verdict.js`](../../scripts/autowork-verdict.js), **which is
 the actual guardrail**. The prompt is the fast path; the script is the boundary.
-It re-derives the decision itself and downgrades to `review` on any of:
+It re-derives the decision itself. There are three outcomes:
+
+| Decision | When | Label |
+|---|---|---|
+| `work` | ≤ `max-points`, confidence high, no hard stop | `autowork-queued`, then `autoworked` |
+| `offer` | ≤ `offer-max-points` or confidence medium, no hard stop | `autowork-offered` — a Beacon admin decides |
+| `review` | anything else | `needs-human` |
+
+Confidence missing or unrecognised counts as low. These are hard stops, always
+`review` whatever the size:
 
 | Check | Why it is enforced outside the model |
 |---|---|
-| `points > max-points` | The threshold is the operator's call, not the model's |
+| `points > offer-max-points`, or confidence low | The thresholds are the operator's call, not the model's |
 | any reported path matches `blocked-paths` | A model that was talked into `decision: "work"` cannot also talk its way past a regex |
 | no files, or no acceptance criteria | Nothing was actually authorized, and there is no definition of done |
 | branch prefix outside `branch-prefixes` | A prefix outside the consumer's CI branch filter gives the PR no checks, silently |
