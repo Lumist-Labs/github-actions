@@ -290,8 +290,10 @@ jobs:
               echo "no trailing period, no quotes, no branch names, no conventional-commit"
               echo "prefix. Output the title alone. The commits are:"
               echo
+              # Slice in jq: `| head -40` under pipefail dies with SIGPIPE (141)
+              # once a release has more than 40 commits.
               gh pr view "$PR_NUMBER" --repo "$REPO" --json commits \
-                --jq '.commits[].messageHeadline' | head -40
+                --jq '.commits[:40][].messageHeadline'
             } > /tmp/title-prompt.txt
 
             if claude --print --model "$CLAUDE_MODEL" --max-turns 1 \
@@ -668,7 +670,7 @@ jobs:
           # `## Summary` is dropped (the card's own title already says what this
           # is); any other h2 — `## Review notes` — becomes bold, because Teams
           # MessageCard does not render `##` and would print the hashes raw.
-          if printf '%s' "$BODY" | grep -q '<!-- auto-summary -->'; then
+          if grep -q '<!-- auto-summary -->' <<<"$BODY"; then
             DESC=$(printf '%s' "$BODY" \
               | sed -n '/<!-- auto-summary -->/,/<!-- \/auto-summary -->/p' \
               | sed '1d;$d' \
