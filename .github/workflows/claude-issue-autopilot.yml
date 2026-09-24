@@ -188,8 +188,15 @@ on:
         description: 'Anthropic API key. Required UNLESS the OIDC path resolves one.'
         required: false
       RELEASE_BOT_PRIVATE_KEY:
-        description: 'Private key of the GitHub App that acts on the target repo.'
-        required: true
+        description: 'Private key of the GitHub App that acts on the target repo. Not needed with TARGET_REPO_TOKEN.'
+        required: false
+      TARGET_REPO_TOKEN:
+        description: >-
+          A token for the target repo's own org, used instead of minting an App
+          token there (e.g. the LumistBot PAT for aretecp repos, where the App
+          isn't installed). Needs contents, pull requests and issues write. It
+          never enters a Claude step's environment.
+        required: false
 
 # One autopilot per issue. `cancel-in-progress` is FALSE because a cancel landing
 # between `git push` and `gh pr create` leaves an orphan branch and no PR, and
@@ -201,6 +208,8 @@ concurrency:
 jobs:
   score:
     runs-on: ${{ inputs.runner }}
+    env:
+      USE_TARGET_TOKEN: ${{ secrets.TARGET_REPO_TOKEN != '' }}
     container:
       image: ${{ inputs.container-image }}
     defaults:
@@ -234,7 +243,7 @@ jobs:
           if [ "$MODE" != auto ] && [ "$MODE" != override ]; then
             echo "::error::mode must be auto or override, got '$MODE'"; exit 1
           fi
-          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+          if [ "$USE_TARGET_TOKEN" != true ] && { [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; }; then
             echo "::error::Set vars.RELEASE_BOT_APP_ID (or the app-id input) and forward secrets.RELEASE_BOT_PRIVATE_KEY via 'secrets: inherit'."
             exit 1
           fi
@@ -255,6 +264,7 @@ jobs:
 
       - name: Mint a GitHub App token for the target repo
         id: bot
+        if: env.USE_TARGET_TOKEN != 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
@@ -271,7 +281,7 @@ jobs:
       - name: Guard against a repeat run
         id: guard
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
         run: |
@@ -299,7 +309,7 @@ jobs:
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.base-branch }}
-          token: ${{ steps.bot.outputs.token }}
+          token: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           persist-credentials: false
 
       - name: Checkout shared workflow assets (prompts and verdict parser)
@@ -344,7 +354,7 @@ jobs:
       - name: Acknowledge trigger
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
         run: gh api "repos/$REPO/issues/$ISSUE/reactions" -f content=eyes
@@ -352,7 +362,7 @@ jobs:
       - name: Get issue info
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
         run: |
@@ -447,7 +457,7 @@ jobs:
       - name: Comment the verdict and label the issue
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
           DECISION: ${{ steps.verdict.outputs.decision }}
@@ -468,9 +478,9 @@ jobs:
 
       # Otherwise a failed scoring pass leaves only an `eyes` reaction behind.
       - name: Hand back to a human on failure
-        if: failure() && steps.bot.outputs.token != ''
+        if: failure() && (steps.bot.outputs.token != '' || env.USE_TARGET_TOKEN == 'true')
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -488,6 +498,8 @@ jobs:
     needs: score
     if: needs.score.outputs.proceed == 'true' && needs.score.outputs.decision == 'work'
     runs-on: ${{ inputs.runner }}
+    env:
+      USE_TARGET_TOKEN: ${{ secrets.TARGET_REPO_TOKEN != '' }}
     container:
       image: ${{ inputs.container-image }}
     defaults:
@@ -523,6 +535,7 @@ jobs:
 
       - name: Mint a read-only App token
         id: reader
+        if: env.USE_TARGET_TOKEN != 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
@@ -540,7 +553,7 @@ jobs:
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.base-branch }}
-          token: ${{ steps.reader.outputs.token }}
+          token: ${{ secrets.TARGET_REPO_TOKEN || steps.reader.outputs.token }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -595,7 +608,7 @@ jobs:
       - name: Build implementation prompt
         env:
           EVIDENCE: ${{ inputs.evidence }}
-          GH_TOKEN: ${{ steps.reader.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.reader.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
         run: |
@@ -690,6 +703,7 @@ jobs:
       # Minted only now, so no token that can push existed while Claude ran.
       - name: Mint a write App token
         id: bot
+        if: env.USE_TARGET_TOKEN != 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
@@ -702,7 +716,7 @@ jobs:
 
       - name: Commit, push and open the draft PR
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
           BRANCH: ${{ needs.score.outputs.branch }}
@@ -764,7 +778,7 @@ jobs:
       # would otherwise leave the issue sitting there looking queued.
       - name: Mint a token for the failure handback
         id: rescue
-        if: failure()
+        if: failure() && env.USE_TARGET_TOKEN != 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
@@ -776,7 +790,7 @@ jobs:
       - name: Hand back to a human on failure
         if: failure()
         env:
-          GH_TOKEN: ${{ steps.rescue.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.rescue.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
