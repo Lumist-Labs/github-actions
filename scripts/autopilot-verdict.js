@@ -142,8 +142,12 @@ const DECISION_TEXT = {
 };
 
 const md = [];
-// Marker the work job greps for when it re-reads this comment as its brief.
-md.push('<!-- autopilot-verdict -->');
+// Hidden marker carrying the score as JSON. The work job finds its brief by
+// the marker, and Beacon stores the score from it. `--` is escaped so nothing
+// in a reason can close the HTML comment early.
+const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived })
+  .replace(/--/g, '-\\u002d');
+md.push(`<!-- autopilot-verdict ${scoreData} -->`);
 md.push('### Autopilot score');
 md.push('');
 md.push('| | |');
@@ -194,6 +198,18 @@ if (decision === 'review') {
   md.push('The pull request will be opened as a **draft** with no local verification — CI on it is the first real check.');
 }
 fs.writeFileSync(commentPath, md.join('\n') + '\n');
+
+// The run page shows this, so a green run still says what Autopilot decided.
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const summary = [
+    `### Autopilot: ${DECISION_TEXT[decision]}`,
+    '',
+    `${validPoints ? points + ' points' : 'no valid score'}, ${confidence} confidence`,
+    '',
+    ...objections.map((o) => `- ${o}`),
+  ];
+  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n') + '\n');
+}
 
 if (process.env.GITHUB_OUTPUT) {
   fs.appendFileSync(

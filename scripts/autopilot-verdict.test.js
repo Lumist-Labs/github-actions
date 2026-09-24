@@ -140,3 +140,13 @@ test('override comment lists what was waived', () => {
 test('only the literal string true overrides', () => {
   assert.equal(run({ ...GOOD, points: 8 }, { OVERRIDE: '1' }).verdict.decision, 'review');
 });
+
+test('the marker carries the score as JSON that cannot close the comment', () => {
+  const { comment } = run({ ...GOOD, reason: 'uses --> and -- in text' });
+  const m = comment.match(/<!-- autopilot-verdict (.*?) -->/);
+  assert.ok(m, 'marker present on one line');
+  const data = JSON.parse(m[1]);
+  assert.equal(data.decision, 'work');
+  assert.equal(data.points, 1);
+  assert.equal(data.reason, 'uses --> and -- in text');
+});
