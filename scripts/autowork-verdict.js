@@ -61,8 +61,8 @@ const objections = [];
 if (parseError) {
   objections.push(`the scoring pass did not return usable JSON (${parseError})`);
 }
-if (parsed.decision !== 'work') {
-  objections.push(blockedReason || reason || 'the scoring pass chose human review');
+if (parsed.decision !== 'work' && !blockedReason) {
+  objections.push(reason || 'the scoring pass chose human review');
 }
 if (points > maxPoints) {
   objections.push(`scored ${points} points, above the ${maxPoints}-point autowork threshold`);
@@ -86,11 +86,15 @@ if (!acceptance.length) {
 // A branch prefix outside the consumer's CI filter produces a PR with no checks
 // at all, and nothing about that failure is visible — so an unknown prefix is a
 // hard stop, not a silent rewrite.
+//
+// The whole name is matched, not just its start: `branch` is written to
+// GITHUB_OUTPUT below, and a model-supplied newline would let it append its own
+// `decision=work` after ours and win.
 const prefix = branch.split('/')[0];
 if (!branch.includes('/') || !prefixes.includes(prefix)) {
   objections.push(`branch "${branch || '(none)'}" is not one of ${prefixes.map((p) => p + "/…").join(", ")}, which would leave the PR without CI checks`);
-} else if (!new RegExp(`^[a-z]+/${issue}-`).test(branch)) {
-  objections.push(`branch "${branch}" does not carry the issue number, which the repeat-run guard relies on`);
+} else if (!new RegExp(`^[a-z]+/${issue}-[a-z0-9]+(-[a-z0-9]+)*$`).test(branch)) {
+  objections.push(`branch "${JSON.stringify(branch)}" is not \`${prefix}/${issue}-lowercase-kebab\`, which the repeat-run guard relies on`);
 }
 
 const decision = objections.length ? 'review' : 'work';
@@ -142,7 +146,7 @@ fs.writeFileSync(commentPath, md.join('\n') + '\n');
 if (process.env.GITHUB_OUTPUT) {
   fs.appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `decision=${decision}\npoints=${points}\nbranch=${branch}\n`
+    `decision=${decision}\npoints=${points}\nbranch=${decision === 'work' ? branch : ''}\n`
   );
 }
 

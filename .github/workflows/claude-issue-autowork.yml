@@ -46,9 +46,8 @@ name: Claude Issue Autowork (shared)
 # REQUIRED CALLER PERMISSIONS
 # ---------------------------
 #   permissions:
-#     contents: write        # the work job pushes a branch
+#     contents: read         # the push goes through the App token, not this one
 #     issues: write          # comments + labels
-#     pull-requests: write   # opens the draft PR
 #     id-token: write        # OIDC path for the Anthropic key
 #
 # REQUIRED CALLER CONFIG
@@ -66,9 +65,8 @@ name: Claude Issue Autowork (shared)
 #     issues:
 #       types: [opened, labeled]
 #   permissions:
-#     contents: write
+#     contents: read
 #     issues: write
-#     pull-requests: write
 #     id-token: write
 #   jobs:
 #     autowork:
@@ -143,12 +141,12 @@ on:
         description: 'Model for the scoring pass. This is the decision, so bias to capability.'
         required: false
         type: string
-        default: claude-opus-4-6
+        default: claude-opus-5-5
       implement-model:
         description: 'Model for the implementation pass.'
         required: false
         type: string
-        default: claude-sonnet-4-6
+        default: claude-sonnet-5
       max-turns:
         description: 'Turn cap on the implementation pass. The scoring pass is fixed at 20.'
         required: false
@@ -369,11 +367,14 @@ jobs:
           cat /tmp/score-prompt.txt
           echo "::endgroup::"
 
+      # Read-only tools, no GitHub token and the default permission mode, because
+      # the issue body is untrusted and --print then denies reads outside the
+      # checkout — otherwise an injected issue could read the self-hosted
+      # runner's home directory into a public comment.
       - name: Run Claude scoring pass
         if: steps.guard.outputs.proceed == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CLAUDE_MODEL: ${{ inputs.claude-model }}
         run: |
           set -euo pipefail
@@ -385,7 +386,7 @@ jobs:
             --model "$CLAUDE_MODEL" \
             --system-prompt-file .shared-actions/.claude/prompts/ci-autowork-score.md \
             --max-turns 20 \
-            --permission-mode bypassPermissions \
+            --tools Read,Glob,Grep \
             --verbose \
             < /tmp/score-prompt.txt \
             > /tmp/score-raw.txt \
@@ -433,40 +434,39 @@ jobs:
             gh issue edit "$ISSUE" --remove-label autowork-queued --add-label needs-human || true
           fi
 
+      # Otherwise a failed scoring pass leaves only an `eyes` reaction behind.
+      - name: Hand back to a human on failure
+        if: failure() && steps.guard.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue comment "$ISSUE" --body "Autowork could not score this issue: ${RUN_URL}. Nothing was changed. Over to a human." || true
+          gh issue edit "$ISSUE" --add-label needs-human || true
+
   work:
     needs: score
     if: needs.score.outputs.proceed == 'true' && needs.score.outputs.decision == 'work'
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.environment }}
     timeout-minutes: 45
-    env:
-      npm_config_cache: ${{ github.workspace }}/.npm-cache
-      npm_config_prefix: ${{ github.workspace }}/.npm-global
+    # Read-only on contents because the push and the PR go through the App
+    # token, minted only after Claude has exited.
     permissions:
-      contents: write
+      contents: read
       issues: write
-      pull-requests: write
       id-token: write
     steps:
-      # The App token, not GITHUB_TOKEN: a PR opened by GITHUB_TOKEN does not
-      # fire `on: pull_request`, so the consumer's CI would never run on it and
-      # the reviewer would get an unchecked diff.
-      - name: Mint a GitHub App token
-        id: bot
-        uses: actions/create-github-app-token@v2
-        with:
-          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-          permission-issues: write
-
+      # persist-credentials false because Claude runs with bypassPermissions on
+      # an untrusted issue body, and a token left in .git/config is one it can
+      # push with.
       - name: Checkout consumer repository
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.base-branch || github.event.repository.default_branch }}
           fetch-depth: 0
-          token: ${{ steps.bot.outputs.token }}
+          persist-credentials: false
 
       - name: Checkout shared workflow assets (prompts)
         uses: actions/checkout@v4
@@ -474,15 +474,23 @@ jobs:
           repository: Lumist-Labs/github-actions
           ref: ${{ inputs.shared-ref }}
           path: .shared-actions
+          persist-credentials: false
 
-      # Without this, `git diff` on the self-hosted host reports "not a git
-      # repository" rather than a dubious-ownership error, and the run fails far
-      # from its cause.
-      - name: Trust the workspace and set the commit identity
+      # safe.directory because otherwise `git diff` on the self-hosted host says
+      # "not a git repository" and the run fails far from its cause. The
+      # exclude keeps our own checkout out of `git add -A`.
+      - name: Prepare the work branch
+        id: prep
+        env:
+          BRANCH: ${{ needs.score.outputs.branch }}
         run: |
+          set -euo pipefail
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git config user.name "lumist-release-bot[bot]"
           git config user.email "lumist-release-bot[bot]@users.noreply.github.com"
+          echo '.shared-actions/' >> .git/info/exclude
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git checkout -b "$BRANCH"
 
       - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
         if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
@@ -498,27 +506,24 @@ jobs:
         with:
           node-version: 22
 
+      # Under RUNNER_TEMP, not the workspace like the score job, because this
+      # job commits the workspace and `git add -A` would sweep the npm prefix
+      # and cache into the pull request.
       - name: Install Claude Code
         run: |
+          export npm_config_prefix="$RUNNER_TEMP/npm-global" npm_config_cache="$RUNNER_TEMP/npm-cache"
           npm install -g @anthropic-ai/claude-code@latest
-          echo "${{ github.workspace }}/.npm-global/bin" >> "$GITHUB_PATH"
-
-      - name: Create the work branch
-        env:
-          BRANCH: ${{ needs.score.outputs.branch }}
-        run: git checkout -b "$BRANCH"
+          echo "$RUNNER_TEMP/npm-global/bin" >> "$GITHUB_PATH"
 
       - name: Build implementation prompt
         env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
           set -euo pipefail
           gh issue view "$ISSUE" --json title -q .title > /tmp/issue-title.txt
           gh issue view "$ISSUE" --json body -q .body > /tmp/issue-body.txt
-          # The verdict is re-read from the comment the score job posted, so the
-          # two jobs share no filesystem and nothing has to be cached between
-          # them.
+          # Re-read from the score comment so the two jobs share no filesystem.
           gh issue view "$ISSUE" --json comments \
             -q '[.comments[] | select(.body | contains("<!-- autowork-verdict -->"))] | last | .body' \
             > /tmp/verdict-comment.md
@@ -544,10 +549,10 @@ jobs:
           } > /tmp/work-prompt.txt
           echo "::group::Implementation prompt"; cat /tmp/work-prompt.txt; echo "::endgroup::"
 
+      # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass
         env:
           ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
           CLAUDE_MODEL: ${{ inputs.implement-model }}
           MAX_TURNS: ${{ inputs.max-turns }}
         run: |
@@ -569,17 +574,23 @@ jobs:
           echo "::group::Claude stderr"; cat /tmp/work-stderr.log || true; echo "::endgroup::"
           echo "::group::PR body"; cat /tmp/pr-body.md; echo "::endgroup::"
 
-      # Last line of defence. Whatever the scorer authorized and whatever the
-      # implementer believed it was doing, this is what actually changed on disk.
+      # The only check that is a fact rather than intent. Diffed against the
+      # base commit because Claude may have committed despite being told not
+      # to; --no-renames because a move out of a blocked path must still report
+      # the blocked side.
       - name: Re-check the real diff against blocked paths
         env:
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
+          BRANCH: ${{ needs.score.outputs.branch }}
+          BASE_SHA: ${{ steps.prep.outputs.base }}
         run: |
           set -euo pipefail
-          # .shared-actions is our own checkout, not part of the change.
-          git status --porcelain=v1 \
-            | sed -e 's/^...//' -e 's/^.* -> //' \
-            | grep -v '^\.shared-actions/' > /tmp/changed.txt || true
+          if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
+            echo "::error::Claude left $BRANCH (now on $(git rev-parse --abbrev-ref HEAD)). Refusing to push."
+            exit 1
+          fi
+          git add -A
+          git diff --cached --name-only --no-renames "$BASE_SHA" > /tmp/changed.txt
           echo "::group::Changed files"; cat /tmp/changed.txt; echo "::endgroup::"
           if [ ! -s /tmp/changed.txt ]; then
             echo "::error::Claude changed nothing. There is no pull request to open."
@@ -590,6 +601,17 @@ jobs:
             exit 1
           fi
 
+      # Minted only now, so no token that can push existed while Claude ran.
+      - name: Mint a GitHub App token
+        id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
       - name: Commit, push and open the draft PR
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
@@ -597,6 +619,8 @@ jobs:
           BRANCH: ${{ needs.score.outputs.branch }}
           POINTS: ${{ needs.score.outputs.points }}
           BASE: ${{ inputs.base-branch || github.event.repository.default_branch }}
+          BASE_SHA: ${{ steps.prep.outputs.base }}
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           TITLE=$(cat /tmp/issue-title.txt)
@@ -604,9 +628,8 @@ jobs:
           TYPE="${BRANCH%%/*}"
           if [ "$TYPE" = "feature" ]; then TYPE=feat; fi
 
-          # Built as a file rather than a heredoc: a heredoc inside a YAML block
-          # scalar carries the block's indentation into every line of the commit
-          # message.
+          # A file rather than a heredoc, because a heredoc inside a YAML block
+          # scalar carries its indentation into every line of the message.
           {
             echo "${TYPE}: #${ISSUE} ${TITLE}"
             echo ""
@@ -615,14 +638,13 @@ jobs:
             echo "is the first real check."
             echo ""
             echo "Closes #${ISSUE}"
-            echo ""
-            echo "Co-Authored-By: Claude <noreply@anthropic.com>"
           } > /tmp/commit-msg.txt
 
-          git add -A -- . ':!.shared-actions'
+          # One commit with our message, whatever Claude did to history.
+          git reset --soft "$BASE_SHA"
           git commit -F /tmp/commit-msg.txt
 
-          git push -u origin "$BRANCH"
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
 
           {
             echo "> Opened automatically by [autowork](https://github.com/Lumist-Labs/github-actions/blob/main/.github/workflows/claude-issue-autowork.yml)"
@@ -632,38 +654,23 @@ jobs:
             echo "> on this pull request are the first verification it has had. Review it as"
             echo "> you would any other PR, and then some."
             echo ""
-            # In the BODY, not just the commit message, and outside the
-            # blockquote. Consumers that merge to a non-default branch close
-            # issues with a workflow that greps the PR body (areteos-py's
-            # close-issues-on-develop.yml) — a closing keyword that exists only
-            # in the commit is invisible to it, and the issue then sits open
-            # through its own completion. That has already cost this fleet a
-            # duplicated PR once.
+            # In the body, outside the blockquote, because areteos-py's
+            # close-issues-on-develop.yml greps the PR body, not the commit.
             echo "Closes #${ISSUE}"
             echo ""
             cat /tmp/pr-body.md
           } > /tmp/pr-final.md
 
-          gh pr create \
+          URL=$(gh pr create \
             --draft \
             --base "$BASE" \
             --head "$BRANCH" \
             --title "${TYPE}: #${ISSUE} ${TITLE}" \
-            --body-file /tmp/pr-final.md
-
-      - name: Link the PR from the issue
-        env:
-          GH_TOKEN: ${{ steps.bot.outputs.token }}
-          ISSUE: ${{ github.event.issue.number }}
-          BRANCH: ${{ needs.score.outputs.branch }}
-        run: |
-          set -euo pipefail
-          URL=$(gh pr view "$BRANCH" --json url -q .url)
+            --body-file /tmp/pr-final.md)
           gh issue comment "$ISSUE" --body "Autowork opened a draft pull request: ${URL}"
           gh issue edit "$ISSUE" --remove-label autowork-queued --add-label autoworked || true
 
-      # A half-finished run must not look like a success, and must not be left
-      # looking queued either — a human owns it from here.
+      # A half-finished run must not sit there looking queued.
       - name: Hand back to a human on failure
         if: failure()
         env:

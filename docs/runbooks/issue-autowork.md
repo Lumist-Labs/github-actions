@@ -20,9 +20,8 @@ on:
   issues:
     types: [opened, labeled]
 permissions:
-  contents: write
+  contents: read
   issues: write
-  pull-requests: write
   id-token: write
 jobs:
   autowork:
@@ -92,6 +91,22 @@ It is matched **case-insensitively** at both enforcement points — `grep -iE` i
 the work job and `new RegExp(…, 'i')` in the verdict script — so keep consumer
 patterns lowercase. `audit` already catches `AdminAudit.tsx`, and writing
 `[Aa]udit` only makes the pattern look like it has to.
+
+## What Claude can reach
+
+The issue body is untrusted — Beacon promotes end-user text and forwarded email
+verbatim. So neither pass holds a token that can write to GitHub:
+
+- `score` runs with `--tools Read,Glob,Grep`, no `GH_TOKEN`, and the default
+  permission mode, which denies reads outside the checkout.
+- `work` checks out with `persist-credentials: false`, gives Claude no
+  `GH_TOKEN`, and mints the App token only after Claude exits. The App can push
+  to protected `main` for `release-shared.yml`; it must never be in reach of a
+  prompt-injected session.
+
+What remains in reach during `work` is `ANTHROPIC_API_KEY` and the runner host
+itself (`bypassPermissions` includes Bash). Running `work` in a container is the
+fix for the second.
 
 ## Why the work job runs no tests
 

@@ -8,7 +8,7 @@ wrong `review` verdict costs nothing but a comment.
 ## Output contract
 
 Emit **one JSON object and nothing else**. No markdown, no code fence, no preamble, no
-trailing commentary. The workflow parses your entire stdout with `jq`.
+trailing commentary. The workflow parses your entire stdout as JSON.
 
 ```
 {
