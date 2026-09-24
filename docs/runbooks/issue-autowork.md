@@ -88,6 +88,11 @@ two are both statements of intent and only the third is a fact.
 false negative costs an unreviewed change to something load-bearing. Narrow it
 per consumer if it is catching too much, but narrow it deliberately.
 
+It is matched **case-insensitively** at both enforcement points — `grep -iE` in
+the work job and `new RegExp(…, 'i')` in the verdict script — so keep consumer
+patterns lowercase. `audit` already catches `AdminAudit.tsx`, and writing
+`[Aa]udit` only makes the pattern look like it has to.
+
 ## Why the work job runs no tests
 
 It has no toolchain and does not try to get one. `actions/setup-python` 404s on
