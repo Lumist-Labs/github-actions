@@ -67,6 +67,13 @@ Field rules:
 - **You are guessing.** If you would open the PR with a caveat, that caveat is the
   reason a human should go first.
 
+## Evidence
+
+The prompt may carry an `<evidence>` block: error lines from the app's production
+logs, collected by Beacon for this report. Use it to find the failing code path. If it
+shows the cause is configuration or data rather than code (a bad recipient, an expired
+connection), say so in `reason` and decide `review`; there is no code change to make.
+
 ## How to read the issue
 
 1. Read the project's `CLAUDE.md` (and `AGENTS.md` if present) before anything else —

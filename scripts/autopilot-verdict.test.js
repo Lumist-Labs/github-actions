@@ -140,3 +140,20 @@ test('override comment lists what was waived', () => {
 test('only the literal string true overrides', () => {
   assert.equal(run({ ...GOOD, points: 8 }, { OVERRIDE: '1' }).verdict.decision, 'review');
 });
+
+test('the marker carries the score as JSON that cannot close the comment', () => {
+  const { comment } = run({ ...GOOD, reason: 'uses --> and -- in text' });
+  const m = comment.match(/<!-- autopilot-verdict (.*?) -->/);
+  assert.ok(m, 'marker present on one line');
+  const data = JSON.parse(m[1]);
+  assert.equal(data.decision, 'work');
+  assert.equal(data.points, 1);
+  assert.equal(data.reason, 'uses --> and -- in text');
+});
+
+test('a reason quoting an HTML comment cannot hide the rest of the comment', () => {
+  const { comment } = run({ ...GOOD, points: 5, reason: 'the template has <!-- note --> in it' });
+  const visibleText = comment.replace(/<!-- autopilot-verdict .*? -->/, '');
+  assert.ok(!visibleText.includes('<!--'), 'no raw comment opener outside the marker');
+  assert.match(visibleText, /needs a developer/);
+});

@@ -141,9 +141,17 @@ const DECISION_TEXT = {
   review: 'developer review',
 };
 
+// Model-written text goes into the visible comment too, where a stray `<!--`
+// would open an HTML comment and hide everything after it.
+const visible = (text) => text.replace(/<!--/g, '<!\u200b--').replace(/-->/g, '--\u200b>');
+
 const md = [];
-// Marker the work job greps for when it re-reads this comment as its brief.
-md.push('<!-- autopilot-verdict -->');
+// Hidden marker carrying the score as JSON. The work job finds its brief by
+// the marker, and Beacon stores the score from it. `--` is escaped so nothing
+// in a reason can close the HTML comment early.
+const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived })
+  .replace(/--/g, '-\\u002d');
+md.push(`<!-- autopilot-verdict ${scoreData} -->`);
 md.push('### Autopilot score');
 md.push('');
 md.push('| | |');
@@ -155,7 +163,7 @@ md.push(`| **Decision** | ${DECISION_TEXT[decision]} |`);
 if (decision === 'work') md.push(`| **Branch** | \`${branch}\` |`);
 md.push('');
 if (reason) {
-  md.push(reason);
+  md.push(visible(reason));
   md.push('');
 }
 if (files.length) {
@@ -173,7 +181,7 @@ if (acceptance.length) {
 if (decision === 'review') {
   md.push('**Why this needs a developer:**');
   md.push('');
-  objections.forEach((o) => md.push(`- ${o}`));
+  objections.forEach((o) => md.push(`- ${visible(o)}`));
   md.push('');
   md.push(override
     ? 'Nothing has been changed. An admin trigger cannot waive these; fix the issue or work it by hand.'
@@ -181,19 +189,31 @@ if (decision === 'review') {
 } else if (decision === 'offer') {
   md.push('**Why this is offered rather than automatic:**');
   md.push('');
-  objections.forEach((o) => md.push(`- ${o}`));
+  objections.forEach((o) => md.push(`- ${visible(o)}`));
   md.push('');
   md.push('Nothing protected is in scope. Nothing has been changed; a Beacon admin can start it.');
 } else {
   if (override) {
     md.push(waived.length ? '**Started by a Beacon admin, waiving:**' : '**Started by a Beacon admin.**');
     md.push('');
-    waived.forEach((o) => md.push(`- ${o}`));
+    waived.forEach((o) => md.push(`- ${visible(o)}`));
     if (waived.length) md.push('');
   }
   md.push('The pull request will be opened as a **draft** with no local verification — CI on it is the first real check.');
 }
 fs.writeFileSync(commentPath, md.join('\n') + '\n');
+
+// The run page shows this, so a green run still says what Autopilot decided.
+if (process.env.GITHUB_STEP_SUMMARY) {
+  const summary = [
+    `### Autopilot: ${DECISION_TEXT[decision]}`,
+    '',
+    `${validPoints ? points + ' points' : 'no valid score'}, ${confidence} confidence`,
+    '',
+    ...objections.map((o) => `- ${o}`),
+  ];
+  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n') + '\n');
+}
 
 if (process.env.GITHUB_OUTPUT) {
   fs.appendFileSync(
