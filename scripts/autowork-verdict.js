@@ -19,8 +19,11 @@
 // goes to a human. Anything that makes the change unsafe or unauthorized is a
 // hard stop and always `review`; only size and confidence can land on `offer`.
 //
+// OVERRIDE=true is a Beacon admin's trigger. It waives size, confidence and the
+// model's own `review`, never a stop that makes the change unsafe.
+//
 // Reads from env: MAX_POINTS, OFFER_MAX_POINTS, BLOCKED_PATHS, BRANCH_PREFIXES,
-// ISSUE, GITHUB_OUTPUT.
+// OVERRIDE, ISSUE, GITHUB_OUTPUT.
 
 const fs = require('fs');
 
@@ -30,6 +33,7 @@ const offerMaxPoints = Number(process.env.OFFER_MAX_POINTS || 3);
 const blocked = new RegExp(process.env.BLOCKED_PATHS || '(^alembic/)', 'i');
 const prefixes = (process.env.BRANCH_PREFIXES || 'feat|fix').split('|');
 const issue = process.env.ISSUE || '0';
+const override = process.env.OVERRIDE === 'true';
 
 // The prompt says "JSON and nothing else", and models mostly comply. Mostly is
 // not a parser: pull the outermost brace-delimited span and ignore any prose or
@@ -64,42 +68,44 @@ const blockedReason = typeof parsed.blocked_reason === 'string' ? parsed.blocked
 const confidence = ['high', 'medium', 'low'].includes(parsed.confidence) ? parsed.confidence : 'low';
 
 // Collected rather than returned early, so the comment can list every one that
-// fired. `hard` always means review; `soft` alone means offer.
-const hard = [];
+// fired. `unsafe` is always review. `judged` is review unless an admin
+// overrides. `soft` alone is an offer.
+const unsafe = [];
+const judged = [];
 const soft = [];
 
 if (parseError) {
-  hard.push(`the scoring pass did not return usable JSON (${parseError})`);
+  unsafe.push(`the scoring pass did not return usable JSON (${parseError})`);
 }
 if (parsed.decision !== 'work' && !blockedReason) {
-  hard.push(reason || 'the scoring pass chose human review');
+  judged.push(reason || 'the scoring pass chose human review');
 }
 if (!parseError && !validPoints) {
-  hard.push(`points ${JSON.stringify(parsed.points)} is not on the 1/2/3/5/8/13 scale`);
+  unsafe.push(`points ${JSON.stringify(parsed.points)} is not on the 1/2/3/5/8/13 scale`);
 } else if (points > offerMaxPoints) {
-  hard.push(`scored ${points} points, above the ${offerMaxPoints}-point offer threshold`);
+  judged.push(`scored ${points} points, above the ${offerMaxPoints}-point offer threshold`);
 } else if (points > maxPoints) {
   soft.push(`scored ${points} points, above the ${maxPoints}-point autowork threshold`);
 }
 if (confidence === 'low') {
-  hard.push('the scoring pass reported low confidence');
+  judged.push('the scoring pass reported low confidence');
 } else if (confidence === 'medium') {
   soft.push('the scoring pass reported medium confidence');
 }
 if (blockedReason) {
-  hard.push(`flagged as permanently unsuitable: ${blockedReason}`);
+  unsafe.push(`flagged as permanently unsuitable: ${blockedReason}`);
 }
 
 const hits = files.filter((f) => blocked.test(f));
 if (hits.length) {
-  hard.push(`touches protected paths — ${hits.join(', ')}`);
+  unsafe.push(`touches protected paths — ${hits.join(', ')}`);
 }
 
 if (!files.length) {
-  hard.push('the scoring pass named no files, so nothing was actually authorized');
+  unsafe.push('the scoring pass named no files, so nothing was actually authorized');
 }
 if (!acceptance.length) {
-  hard.push('no acceptance criteria, so there is no definition of done to implement against');
+  unsafe.push('no acceptance criteria, so there is no definition of done to implement against');
 }
 
 // A branch prefix outside the consumer's CI filter produces a PR with no checks
@@ -111,17 +117,22 @@ if (!acceptance.length) {
 // `decision=work` after ours and win.
 const prefix = branch.split('/')[0];
 if (!branch.includes('/') || !prefixes.includes(prefix)) {
-  hard.push(`branch "${branch || '(none)'}" is not one of ${prefixes.map((p) => p + "/…").join(", ")}, which would leave the PR without CI checks`);
+  unsafe.push(`branch "${branch || '(none)'}" is not one of ${prefixes.map((p) => p + "/…").join(", ")}, which would leave the PR without CI checks`);
 } else if (!new RegExp(`^[a-z]+/${issue}-[a-z0-9]+(-[a-z0-9]+)*$`).test(branch)) {
-  hard.push(`branch "${JSON.stringify(branch)}" is not \`${prefix}/${issue}-lowercase-kebab\`, which the repeat-run guard relies on`);
+  unsafe.push(`branch "${JSON.stringify(branch)}" is not \`${prefix}/${issue}-lowercase-kebab\`, which the repeat-run guard relies on`);
 }
 
-const decision = hard.length ? 'review' : soft.length ? 'offer' : 'work';
-const objections = [...hard, ...soft];
+let decision;
+if (unsafe.length) decision = 'review';
+else if (override) decision = 'work';
+else if (judged.length) decision = 'review';
+else decision = soft.length ? 'offer' : 'work';
+const objections = override && !unsafe.length ? [] : [...unsafe, ...judged, ...soft];
+const waived = override && !unsafe.length ? [...judged, ...soft] : [];
 
 fs.writeFileSync(
   verdictPath,
-  JSON.stringify({ decision, points, confidence, branch, files, acceptance, reason, objections }, null, 2)
+  JSON.stringify({ decision, override, points, confidence, branch, files, acceptance, reason, objections, waived }, null, 2)
 );
 
 const DECISION_TEXT = {
@@ -164,7 +175,9 @@ if (decision === 'review') {
   md.push('');
   objections.forEach((o) => md.push(`- ${o}`));
   md.push('');
-  md.push(`Nothing has been changed. If you disagree, fix the issue body and re-apply the \`autowork\` label.`);
+  md.push(override
+    ? 'Nothing has been changed. An admin trigger cannot waive these; fix the issue or work it by hand.'
+    : 'Nothing has been changed. If you disagree, fix the issue body and trigger autowork again.');
 } else if (decision === 'offer') {
   md.push('**Why this is offered rather than automatic:**');
   md.push('');
@@ -172,6 +185,12 @@ if (decision === 'review') {
   md.push('');
   md.push('Nothing protected is in scope. Nothing has been changed; a Beacon admin can start it.');
 } else {
+  if (override) {
+    md.push(waived.length ? '**Started by a Beacon admin, waiving:**' : '**Started by a Beacon admin.**');
+    md.push('');
+    waived.forEach((o) => md.push(`- ${o}`));
+    if (waived.length) md.push('');
+  }
   md.push('The pull request will be opened as a **draft** with no local verification — CI on it is the first real check.');
 }
 fs.writeFileSync(commentPath, md.join('\n') + '\n');
