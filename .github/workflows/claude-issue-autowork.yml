@@ -32,12 +32,13 @@ name: Claude Issue Autowork (shared)
 # after Claude exits — the App can push to protected `main` for
 # release-shared.yml and must never be in reach of a prompt-injected session.
 #
-# WHY THE WORK JOB RUNS NO TESTS
-# ------------------------------
-# `actions/setup-python` 404s on the self-hosted host (no manifest for Arch —
-# see docs/runbooks/runners-and-ci.md). The target's own CI is the real gate.
-# Containerizing this job in ghcr.io/lumist-labs/ci-python-uv:3.12 is the
-# intended upgrade.
+# WHY BOTH JOBS RUN IN A CONTAINER
+# --------------------------------
+# On the self-hosted hosts, other repos' containerized CI leaves uid-0 files in
+# the shared per-repo workspace, and a bare job's actions/checkout then fails
+# to clean it (docs/runbooks/runners-and-ci.md). It also keeps the
+# implementation pass's Bash inside a container rather than on the host. The
+# target's own CI is still the real test gate.
 #
 # AUTHENTICATION
 # --------------
@@ -148,6 +149,11 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      container-image:
+        description: 'Image both jobs run in. Needs node 22, git and bash.'
+        required: false
+        type: string
+        default: ghcr.io/lumist-labs/ci-node:22
 
       # --- OIDC path (preferred) — all four are optional OVERRIDES ---
       infisical-identity-id:
@@ -188,14 +194,13 @@ concurrency:
 jobs:
   score:
     runs-on: ${{ inputs.runner }}
+    container:
+      image: ${{ inputs.container-image }}
+    defaults:
+      run:
+        shell: bash
     environment: ${{ inputs.environment }}
     timeout-minutes: 20
-    # `npm install -g` assumes a hosted runner's writable prefix. The `runner`
-    # context is unavailable in job-level env — using it here does not warn, it
-    # makes the whole workflow invalid. Hence `github.workspace`.
-    env:
-      npm_config_cache: ${{ github.workspace }}/.npm-cache
-      npm_config_prefix: ${{ github.workspace }}/.npm-global
     permissions:
       contents: read
       id-token: write
@@ -228,6 +233,18 @@ jobs:
           fi
           echo "owner=${REPO%%/*}" >> "$GITHUB_OUTPUT"
           echo "name=${REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      # Pinned, and fetched with node because the image has no curl.
+      - name: Install the GitHub CLI
+        env:
+          GH_VERSION: '2.63.2'
+        run: |
+          set -euo pipefail
+          node -e 'fetch(process.argv[1]).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer() }).then(b => require("fs").writeFileSync("/tmp/gh.tgz", Buffer.from(b)))' \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/gh.tgz -C /tmp
+          install "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+          gh --version | head -1
 
       - name: Mint a GitHub App token for the target repo
         id: bot
@@ -313,17 +330,9 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
-        if: steps.guard.outputs.proceed == 'true'
-        with:
-          node-version: 22
-
       - name: Install Claude Code
         if: steps.guard.outputs.proceed == 'true'
-        run: |
-          npm install -g @anthropic-ai/claude-code@latest
-          # npm_config_prefix moved the global bin off the default PATH.
-          echo "${{ github.workspace }}/.npm-global/bin" >> "$GITHUB_PATH"
+        run: npm install -g @anthropic-ai/claude-code@latest
 
       - name: Acknowledge trigger
         if: steps.guard.outputs.proceed == 'true'
@@ -452,10 +461,21 @@ jobs:
           gh issue comment "$ISSUE" -R "$REPO" --body "Autowork could not score this issue: ${RUN_URL}. Nothing was changed. Over to a human." || true
           gh issue edit "$ISSUE" -R "$REPO" --add-label needs-human || true
 
+      # Root in the container writes uid-0 files into the host's workspace; hand
+      # them back so the next bare job on this runner can clean up.
+      - name: Return the workspace to the runner user
+        if: always()
+        run: chown -R "$(stat -c '%u:%g' .)" .
+
   work:
     needs: score
     if: needs.score.outputs.proceed == 'true' && needs.score.outputs.decision == 'work'
     runs-on: ${{ inputs.runner }}
+    container:
+      image: ${{ inputs.container-image }}
+    defaults:
+      run:
+        shell: bash
     environment: ${{ inputs.environment }}
     timeout-minutes: 45
     permissions:
@@ -472,6 +492,18 @@ jobs:
 
       # Read-only, because it exists while Claude runs. The write token is
       # minted after Claude exits.
+      # Pinned, and fetched with node because the image has no curl.
+      - name: Install the GitHub CLI
+        env:
+          GH_VERSION: '2.63.2'
+        run: |
+          set -euo pipefail
+          node -e 'fetch(process.argv[1]).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer() }).then(b => require("fs").writeFileSync("/tmp/gh.tgz", Buffer.from(b)))' \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/gh.tgz -C /tmp
+          install "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh
+          gh --version | head -1
+
       - name: Mint a read-only App token
         id: reader
         uses: actions/create-github-app-token@v2
@@ -538,18 +570,10 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      # Under RUNNER_TEMP, not the workspace like the score job, because this
-      # job commits the workspace and `git add -A` would sweep the npm prefix
-      # and cache into the pull request.
+      # The image's global prefix is outside the workspace, so `git add -A`
+      # can't sweep the install into the pull request.
       - name: Install Claude Code
-        run: |
-          export npm_config_prefix="$RUNNER_TEMP/npm-global" npm_config_cache="$RUNNER_TEMP/npm-cache"
-          npm install -g @anthropic-ai/claude-code@latest
-          echo "$RUNNER_TEMP/npm-global/bin" >> "$GITHUB_PATH"
+        run: npm install -g @anthropic-ai/claude-code@latest
 
       - name: Build implementation prompt
         env:
@@ -734,3 +758,7 @@ jobs:
         run: |
           gh issue comment "$ISSUE" -R "$REPO" --body "Autowork scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a human." || true
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label needs-human || true
+
+      - name: Return the workspace to the runner user
+        if: always()
+        run: chown -R "$(stat -c '%u:%g' .)" .
