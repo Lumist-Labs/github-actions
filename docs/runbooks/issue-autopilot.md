@@ -1,24 +1,24 @@
-# Issue autowork
+# Issue autopilot
 
-`claude-issue-autowork.yml` scores one issue in a target repo and, for the ones
+`claude-issue-autopilot.yml` scores one issue in a target repo and, for the ones
 that are genuinely small, opens a **draft** pull request. Nothing merges without
 a person, and nothing is verified before the PR exists — the PR's own CI is the
 first check the change gets.
 
-Beacon runs it. Its dispatcher, `beacon/.github/workflows/autowork.yml`, is the
+Beacon runs it. Its dispatcher, `beacon/.github/workflows/autopilot.yml`, is the
 only caller: Beacon dispatches it with `repo`, `issue` and `mode`, and the
-dispatcher looks up that repo's settings in `beacon/.github/autowork-repos.json`.
-Target repos carry no autowork files. Plan and rationale: beacon
+dispatcher looks up that repo's settings in `beacon/.github/autopilot-repos.json`.
+Target repos carry no autopilot files. Plan and rationale: beacon
 `docs/features/auto-dev-loop/CONNECTING.md`.
 
 This is a different job from [`claude-issue-triage.yml`](../../.github/workflows/claude-issue-triage.yml).
-Triage is advisory and runs in each repo on every issue; autowork authorizes an
+Triage is advisory and runs in each repo on every issue; autopilot authorizes an
 unsupervised change and runs only when Beacon asks.
 
 ## Modes
 
 - `auto` — Beacon dispatches it on promote. The thresholds apply.
-- `override` — a Beacon admin's Autowork button. It waives size, confidence and
+- `override` — a Beacon admin's Autopilot button. It waives size, confidence and
   the model's own `review`. It never waives blocked paths, unparseable output,
   invalid points, missing files or acceptance criteria, or a bad branch.
 
@@ -27,11 +27,11 @@ nowhere else.
 
 ## Adding a repo
 
-- Add it to `beacon/.github/autowork-repos.json` with its base branch, runner and
+- Add it to `beacon/.github/autopilot-repos.json` with its base branch, runner and
   `blocked-paths`. Test the pattern against the repo's tree before relying on it.
 - Install `lumist-release-bot` on the repo with contents, pull-requests and
   issues write. A repo in another org needs that org's own installation.
-- Create the labels `autowork-queued`, `autowork-offered`, `autoworked` and
+- Create the labels `autopilot-queued`, `autopilot-offered`, `autopiloted` and
   `needs-human`.
 - Confirm the repo's CI `pull_request` filter covers every `branch-prefixes`
   entry.
@@ -43,24 +43,24 @@ A pull request opened with the default `GITHUB_TOKEN` does not fire
 recursing — but it means an auto-PR opened that way arrives with **no checks at
 all**, which destroys the only real verification this design has. The PR is
 therefore opened with a GitHub App installation token, whose PRs do trigger
-workflows. If you ever see an autowork PR with an empty checks list, that is the
+workflows. If you ever see an autopilot PR with an empty checks list, that is the
 thing that broke.
 
 ## The gate
 
 Two jobs. `score` decides; `work` runs only if `score` said `work`.
 
-`score` runs Claude with [`ci-autowork-score.md`](../../.claude/prompts/ci-autowork-score.md)
+`score` runs Claude with [`ci-autopilot-score.md`](../../.claude/prompts/ci-autopilot-score.md)
 and gets back strict JSON — points, decision, branch, the files it expects to
 touch, and the acceptance criteria. That JSON is then handed to
-[`scripts/autowork-verdict.js`](../../scripts/autowork-verdict.js), **which is
+[`scripts/autopilot-verdict.js`](../../scripts/autopilot-verdict.js), **which is
 the actual guardrail**. The prompt is the fast path; the script is the boundary.
 It re-derives the decision itself. There are three outcomes:
 
 | Decision | When | Label |
 |---|---|---|
-| `work` | ≤ `max-points`, confidence high, no hard stop | `autowork-queued`, then `autoworked` |
-| `offer` | ≤ `offer-max-points` or confidence medium, no hard stop | `autowork-offered` — a Beacon admin decides |
+| `work` | ≤ `max-points`, confidence high, no hard stop | `autopilot-queued`, then `autopiloted` |
+| `offer` | ≤ `offer-max-points` or confidence medium, no hard stop | `autopilot-offered` — a Beacon admin decides |
 | `review` | anything else | `needs-human` |
 
 Confidence missing or unrecognised counts as low. These are hard stops, always
@@ -122,12 +122,12 @@ that is the intended upgrade, not a rewrite.
 ## Re-running, and not running twice
 
 The `score` job stops before spending anything if the issue is already labelled
-`autoworked`, or if a branch matching `*/<issue#>-*` already exists on the
+`autopiloted`, or if a branch matching `*/<issue#>-*` already exists on the
 remote, or if the issue is closed. Either marker alone is enough — the label survives a deleted branch, the
 branch survives a stripped label.
 
 To deliberately re-run after editing an issue body: delete the branch, remove the
-`autoworked` label, and trigger it again from Beacon.
+`autopiloted` label, and trigger it again from Beacon.
 
 `cancel-in-progress` is **false** here, unlike triage. A cancel landing between
 `git push` and `gh pr create` leaves an orphan branch and no PR, which is worse

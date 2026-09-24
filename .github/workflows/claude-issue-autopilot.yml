@@ -5,8 +5,8 @@ name: Claude Issue Autopilot (shared)
 # for a human. Nothing merges without a person.
 #
 # Beacon is the only caller. Its dispatcher (beacon/.github/workflows/
-# autowork.yml) passes the repo, the issue and the mode, plus that repo's
-# settings from autowork-repos.json. Target repos carry no autowork files. Plan:
+# autopilot.yml) passes the repo, the issue and the mode, plus that repo's
+# settings from autopilot-repos.json. Target repos carry no autopilot files. Plan:
 # beacon docs/features/auto-dev-loop/CONNECTING.md.
 #
 # Two jobs, and the split is the point:
@@ -18,7 +18,7 @@ name: Claude Issue Autopilot (shared)
 #           pushes, opens the draft PR.
 #
 # GUARDRAILS ARE LAYERS. The scoring prompt refuses invariant-touching work,
-# scripts/autowork-verdict.js independently re-checks the returned `files[]`
+# scripts/autopilot-verdict.js independently re-checks the returned `files[]`
 # against `blocked-paths` and overrules the model, and the work job checks the
 # diff that actually happened. A prompt is not a security boundary.
 #
@@ -51,8 +51,8 @@ name: Claude Issue Autopilot (shared)
 #   vars.RELEASE_BOT_APP_ID (or the `app-id` input), and
 #   secrets.RELEASE_BOT_PRIVATE_KEY forwarded with `secrets: inherit`.
 #   The App installation on each TARGET repo needs contents, pull-requests and
-#   issues write. Each target needs the labels autowork-queued,
-#   autowork-offered, autoworked and needs-human.
+#   issues write. Each target needs the labels autopilot-queued,
+#   autopilot-offered, autopiloted and needs-human.
 
 on:
   workflow_call:
@@ -184,11 +184,11 @@ on:
         description: 'Private key of the GitHub App that acts on the target repo.'
         required: true
 
-# One autowork per issue. `cancel-in-progress` is FALSE because a cancel landing
+# One autopilot per issue. `cancel-in-progress` is FALSE because a cancel landing
 # between `git push` and `gh pr create` leaves an orphan branch and no PR, and
 # the guard step already no-ops a second run.
 concurrency:
-  group: autowork-${{ inputs.repo }}-${{ inputs.issue }}
+  group: autopilot-${{ inputs.repo }}-${{ inputs.issue }}
   cancel-in-progress: false
 
 jobs:
@@ -276,8 +276,8 @@ jobs:
             echo "Issue #$ISSUE is $STATE — nothing to do."
             echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if grep -qx 'autoworked' <<< "$LABELS"; then
-            echo "Issue #$ISSUE is already labelled autoworked — nothing to do."
+          if grep -qx 'autopiloted' <<< "$LABELS"; then
+            echo "Issue #$ISSUE is already labelled autopiloted — nothing to do."
             echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
           if grep -qE "^[^/]+/${ISSUE}-" <<< "$BRANCHES"; then
@@ -395,7 +395,7 @@ jobs:
           if ! claude \
             --print \
             --model "$CLAUDE_MODEL" \
-            --system-prompt-file .shared-actions/.claude/prompts/ci-autowork-score.md \
+            --system-prompt-file .shared-actions/.claude/prompts/ci-autopilot-score.md \
             --max-turns 20 \
             --tools Read,Glob,Grep \
             --verbose \
@@ -423,7 +423,7 @@ jobs:
           ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
-          node .shared-actions/scripts/autowork-verdict.js \
+          node .shared-actions/scripts/autopilot-verdict.js \
             /tmp/score-raw.txt /tmp/verdict.json /tmp/verdict-comment.md
           echo "::group::Verdict"; cat /tmp/verdict.json; echo "::endgroup::"
 
@@ -440,11 +440,11 @@ jobs:
           # Strip every outcome label before adding one, so a re-run never
           # leaves the issue claiming two. Beacon's webhook reads these.
           case "$DECISION" in
-            work)  ADD=autowork-queued ;;
-            offer) ADD=autowork-offered ;;
+            work)  ADD=autopilot-queued ;;
+            offer) ADD=autopilot-offered ;;
             *)     ADD=needs-human ;;
           esac
-          for L in autowork-queued autowork-offered needs-human; do
+          for L in autopilot-queued autopilot-offered needs-human; do
             [ "$L" = "$ADD" ] || gh issue edit "$ISSUE" -R "$REPO" --remove-label "$L" >/dev/null 2>&1 || true
           done
           gh issue edit "$ISSUE" -R "$REPO" --add-label "$ADD" || true
@@ -586,7 +586,7 @@ jobs:
           gh issue view "$ISSUE" -R "$REPO" --json body -q .body > /tmp/issue-body.txt
           # Re-read from the score comment so the two jobs share no filesystem.
           gh issue view "$ISSUE" -R "$REPO" --json comments \
-            -q '[.comments[] | select(.body | contains("<!-- autowork-verdict -->"))] | last | .body' \
+            -q '[.comments[] | select(.body | contains("<!-- autopilot-verdict -->"))] | last | .body' \
             > /tmp/verdict-comment.md
           {
             echo "Implement issue #${ISSUE}."
@@ -621,7 +621,7 @@ jobs:
           if ! claude \
             --print \
             --model "$CLAUDE_MODEL" \
-            --system-prompt-file .shared-actions/.claude/prompts/ci-autowork-implement.md \
+            --system-prompt-file .shared-actions/.claude/prompts/ci-autopilot-implement.md \
             --max-turns "$MAX_TURNS" \
             --permission-mode bypassPermissions \
             --verbose \
@@ -733,7 +733,7 @@ jobs:
             --title "${TYPE}: #${ISSUE} ${TITLE}" \
             --body-file /tmp/pr-final.md)
           gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot opened a draft pull request: ${URL}"
-          gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label autoworked || true
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label autopiloted || true
 
       # Its own token, because a failure before the write token was minted
       # would otherwise leave the issue sitting there looking queued.
@@ -757,7 +757,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a developer." || true
-          gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label needs-human || true
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label needs-human || true
 
       - name: Return the workspace to the runner user
         if: always()

@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const SCRIPT = path.join(__dirname, 'autowork-verdict.js');
+const SCRIPT = path.join(__dirname, 'autopilot-verdict.js');
 
 const GOOD = {
   points: 1,
@@ -106,7 +106,7 @@ test('branch is only emitted for work', () => {
 test('offer comment names the soft reasons', () => {
   const { comment } = run({ ...GOOD, points: 3, confidence: 'medium' });
   assert.match(comment, /offered rather than automatic/);
-  assert.match(comment, /above the 2-point autowork threshold/);
+  assert.match(comment, /above the 2-point autopilot threshold/);
   assert.match(comment, /medium confidence/);
 });
 

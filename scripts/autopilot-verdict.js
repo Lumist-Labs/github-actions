@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 
-// Parses the scoring model's output and decides, for real, whether autowork may
-// proceed. Called by .github/workflows/claude-issue-autowork.yml.
+// Parses the scoring model's output and decides, for real, whether autopilot may
+// proceed. Called by .github/workflows/claude-issue-autopilot.yml.
 //
-//   node autowork-verdict.js <raw-output> <verdict-json-out> <comment-md-out>
+//   node autopilot-verdict.js <raw-output> <verdict-json-out> <comment-md-out>
 //
 // Node rather than jq because jq is not guaranteed on the self-hosted runner and
 // node is installed for Claude Code anyway.
@@ -85,7 +85,7 @@ if (!parseError && !validPoints) {
 } else if (points > offerMaxPoints) {
   judged.push(`scored ${points} points, above the ${offerMaxPoints}-point offer threshold`);
 } else if (points > maxPoints) {
-  soft.push(`scored ${points} points, above the ${maxPoints}-point autowork threshold`);
+  soft.push(`scored ${points} points, above the ${maxPoints}-point autopilot threshold`);
 }
 if (confidence === 'low') {
   judged.push('the scoring pass reported low confidence');
@@ -143,7 +143,7 @@ const DECISION_TEXT = {
 
 const md = [];
 // Marker the work job greps for when it re-reads this comment as its brief.
-md.push('<!-- autowork-verdict -->');
+md.push('<!-- autopilot-verdict -->');
 md.push('### Autopilot score');
 md.push('');
 md.push('| | |');
@@ -177,7 +177,7 @@ if (decision === 'review') {
   md.push('');
   md.push(override
     ? 'Nothing has been changed. An admin trigger cannot waive these; fix the issue or work it by hand.'
-    : 'Nothing has been changed. If you disagree, fix the issue body and trigger autowork again.');
+    : 'Nothing has been changed. If you disagree, fix the issue body and trigger autopilot again.');
 } else if (decision === 'offer') {
   md.push('**Why this is offered rather than automatic:**');
   md.push('');
