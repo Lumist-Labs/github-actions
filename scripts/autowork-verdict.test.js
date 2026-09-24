@@ -1,0 +1,110 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { execFileSync } = require('child_process');
+
+const SCRIPT = path.join(__dirname, 'autowork-verdict.js');
+
+const GOOD = {
+  points: 1,
+  confidence: 'high',
+  decision: 'work',
+  reason: 'one-line fix',
+  branch: 'fix/7-null-check',
+  files: ['src/app/page.py', 'tests/test_page.py'],
+  acceptance: ['page renders with no items'],
+};
+
+function run(raw) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-'));
+  const rawPath = path.join(dir, 'raw.txt');
+  const outputPath = path.join(dir, 'output');
+  fs.writeFileSync(rawPath, typeof raw === 'string' ? raw : JSON.stringify(raw));
+  fs.writeFileSync(outputPath, '');
+  execFileSync('node', [SCRIPT, rawPath, path.join(dir, 'v.json'), path.join(dir, 'c.md')], {
+    env: {
+      ...process.env,
+      MAX_POINTS: '2',
+      OFFER_MAX_POINTS: '3',
+      BLOCKED_PATHS: '(^alembic/)|(auth)',
+      BRANCH_PREFIXES: 'feat|fix',
+      ISSUE: '7',
+      GITHUB_OUTPUT: outputPath,
+    },
+  });
+  return {
+    verdict: JSON.parse(fs.readFileSync(path.join(dir, 'v.json'), 'utf8')),
+    comment: fs.readFileSync(path.join(dir, 'c.md'), 'utf8'),
+    output: fs.readFileSync(outputPath, 'utf8'),
+  };
+}
+
+const decision = (raw) => run(raw).verdict.decision;
+
+test('small, confident and clean is work', () => {
+  assert.equal(decision(GOOD), 'work');
+  assert.equal(decision({ ...GOOD, points: 2 }), 'work');
+});
+
+test('JSON wrapped in prose still parses', () => {
+  assert.equal(decision(`Here you go:\n${JSON.stringify(GOOD)}\nDone.`), 'work');
+});
+
+test('one size step over, or medium confidence, is an offer', () => {
+  assert.equal(decision({ ...GOOD, points: 3 }), 'offer');
+  assert.equal(decision({ ...GOOD, confidence: 'medium' }), 'offer');
+  assert.equal(decision({ ...GOOD, points: 3, confidence: 'medium' }), 'offer');
+});
+
+test('too big or low confidence is review', () => {
+  assert.equal(decision({ ...GOOD, points: 5 }), 'review');
+  assert.equal(decision({ ...GOOD, confidence: 'low' }), 'review');
+});
+
+test('missing or unknown confidence fails closed', () => {
+  const { confidence, ...rest } = GOOD;
+  assert.equal(decision(rest), 'review');
+  assert.equal(decision({ ...GOOD, confidence: 'very high' }), 'review');
+});
+
+test('hard stops stay review even when size would only make it an offer', () => {
+  const offerSized = { ...GOOD, points: 3 };
+  assert.equal(decision({ ...offerSized, files: ['src/auth/session.py'] }), 'review');
+  assert.equal(decision({ ...offerSized, files: [] }), 'review');
+  assert.equal(decision({ ...offerSized, acceptance: [] }), 'review');
+  assert.equal(decision({ ...offerSized, decision: 'review' }), 'review');
+  assert.equal(decision({ ...offerSized, blocked_reason: 'touches the vault' }), 'review');
+  assert.equal(decision({ ...offerSized, branch: 'docs/7-x' }), 'review');
+  assert.equal(decision({ ...offerSized, branch: 'fix/8-x' }), 'review');
+});
+
+test('points off the Fibonacci scale fail closed', () => {
+  for (const points of [null, '', false, [], '1', 0, 4, undefined]) {
+    assert.equal(decision({ ...GOOD, points }), 'review', `points=${JSON.stringify(points)}`);
+  }
+});
+
+test('unparseable output is review', () => {
+  assert.equal(decision('no json here'), 'review');
+});
+
+test('a newline in branch cannot inject a second decision', () => {
+  const { output } = run({ ...GOOD, files: ['src/auth.py'], branch: 'fix/7-x\ndecision=work' });
+  assert.deepEqual(output.trim().split('\n'), ['decision=review', 'points=1', 'branch=']);
+});
+
+test('branch is only emitted for work', () => {
+  assert.match(run(GOOD).output, /^branch=fix\/7-null-check$/m);
+  assert.match(run({ ...GOOD, points: 3 }).output, /^branch=$/m);
+});
+
+test('offer comment names the soft reasons', () => {
+  const { comment } = run({ ...GOOD, points: 3, confidence: 'medium' });
+  assert.match(comment, /offered rather than automatic/);
+  assert.match(comment, /above the 2-point autowork threshold/);
+  assert.match(comment, /medium confidence/);
+});

@@ -55,8 +55,8 @@ name: Claude Issue Autowork (shared)
 #   secrets.RELEASE_BOT_PRIVATE_KEY   — forward with `secrets: inherit`
 #   The App installation on the consumer repo needs contents:write and
 #   pull-requests:write.
-#   Labels the consumer repo must have: autowork, autowork-queued, autoworked,
-#   needs-human.
+#   Labels the consumer repo must have: autowork, autowork-queued,
+#   autowork-offered, autoworked, needs-human.
 #
 # MINIMAL CONSUMER SHIM
 # ---------------------
@@ -105,6 +105,14 @@ on:
         required: false
         type: number
         default: 2
+      offer-max-points:
+        description: >-
+          Highest score that is offered to a Beacon admin instead of going
+          straight to a human. Medium-confidence issues at or under
+          `max-points` are offered too. Never covers a blocked path.
+        required: false
+        type: number
+        default: 3
       blocked-paths:
         description: >-
           Extended-regex, matched case-insensitively against every path the
@@ -408,6 +416,7 @@ jobs:
         if: steps.guard.outputs.proceed == 'true'
         env:
           MAX_POINTS: ${{ inputs.max-points }}
+          OFFER_MAX_POINTS: ${{ inputs.offer-max-points }}
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
           BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
           ISSUE: ${{ github.event.issue.number }}
@@ -426,13 +435,17 @@ jobs:
         run: |
           set -euo pipefail
           gh issue comment "$ISSUE" --body-file /tmp/verdict-comment.md
-          # Strip both outcome labels before adding one, so a re-run after an
-          # issue edit never leaves the issue claiming both.
-          if [ "$DECISION" = "work" ]; then
-            gh issue edit "$ISSUE" --remove-label needs-human --add-label autowork-queued || true
-          else
-            gh issue edit "$ISSUE" --remove-label autowork-queued --add-label needs-human || true
-          fi
+          # Strip every outcome label before adding one, so a re-run after an
+          # issue edit never leaves the issue claiming two. Beacon reads these.
+          case "$DECISION" in
+            work)  ADD=autowork-queued ;;
+            offer) ADD=autowork-offered ;;
+            *)     ADD=needs-human ;;
+          esac
+          for L in autowork-queued autowork-offered needs-human; do
+            [ "$L" = "$ADD" ] || gh issue edit "$ISSUE" --remove-label "$L" >/dev/null 2>&1 || true
+          done
+          gh issue edit "$ISSUE" --add-label "$ADD" || true
 
       # Otherwise a failed scoring pass leaves only an `eyes` reaction behind.
       - name: Hand back to a human on failure

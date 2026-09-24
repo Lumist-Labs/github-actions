@@ -23,11 +23,13 @@ on:
     paths:
       - '.github/workflows/**'
       - 'actions/**'
+      - 'scripts/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/**'
       - 'actions/**'
+      - 'scripts/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -83,3 +85,14 @@ jobs:
             exit 1
           fi
           echo "No relative action refs under actions/."
+
+  # scripts/autowork-verdict.js is the autowork guardrail and ships to every
+  # consumer through the same v2 tag, so its cases run on every change to it.
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test scripts/*.test.js
