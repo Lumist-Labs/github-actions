@@ -86,7 +86,7 @@ jobs:
           fi
           echo "No relative action refs under actions/."
 
-  # scripts/autowork-verdict.js is the autowork guardrail and ships to every
+  # scripts/autopilot-verdict.js is the autopilot guardrail and ships to every
   # consumer through the same v2 tag, so its cases run on every change to it.
   script-tests:
     runs-on: ubuntu-latest
