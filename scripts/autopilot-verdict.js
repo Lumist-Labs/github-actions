@@ -141,6 +141,10 @@ const DECISION_TEXT = {
   review: 'developer review',
 };
 
+// Model-written text goes into the visible comment too, where a stray `<!--`
+// would open an HTML comment and hide everything after it.
+const visible = (text) => text.replace(/<!--/g, '<!\u200b--').replace(/-->/g, '--\u200b>');
+
 const md = [];
 // Hidden marker carrying the score as JSON. The work job finds its brief by
 // the marker, and Beacon stores the score from it. `--` is escaped so nothing
@@ -159,7 +163,7 @@ md.push(`| **Decision** | ${DECISION_TEXT[decision]} |`);
 if (decision === 'work') md.push(`| **Branch** | \`${branch}\` |`);
 md.push('');
 if (reason) {
-  md.push(reason);
+  md.push(visible(reason));
   md.push('');
 }
 if (files.length) {
@@ -177,7 +181,7 @@ if (acceptance.length) {
 if (decision === 'review') {
   md.push('**Why this needs a developer:**');
   md.push('');
-  objections.forEach((o) => md.push(`- ${o}`));
+  objections.forEach((o) => md.push(`- ${visible(o)}`));
   md.push('');
   md.push(override
     ? 'Nothing has been changed. An admin trigger cannot waive these; fix the issue or work it by hand.'
@@ -185,14 +189,14 @@ if (decision === 'review') {
 } else if (decision === 'offer') {
   md.push('**Why this is offered rather than automatic:**');
   md.push('');
-  objections.forEach((o) => md.push(`- ${o}`));
+  objections.forEach((o) => md.push(`- ${visible(o)}`));
   md.push('');
   md.push('Nothing protected is in scope. Nothing has been changed; a Beacon admin can start it.');
 } else {
   if (override) {
     md.push(waived.length ? '**Started by a Beacon admin, waiving:**' : '**Started by a Beacon admin.**');
     md.push('');
-    waived.forEach((o) => md.push(`- ${o}`));
+    waived.forEach((o) => md.push(`- ${visible(o)}`));
     if (waived.length) md.push('');
   }
   md.push('The pull request will be opened as a **draft** with no local verification — CI on it is the first real check.');

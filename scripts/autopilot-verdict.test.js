@@ -150,3 +150,10 @@ test('the marker carries the score as JSON that cannot close the comment', () =>
   assert.equal(data.points, 1);
   assert.equal(data.reason, 'uses --> and -- in text');
 });
+
+test('a reason quoting an HTML comment cannot hide the rest of the comment', () => {
+  const { comment } = run({ ...GOOD, points: 5, reason: 'the template has <!-- note --> in it' });
+  const visibleText = comment.replace(/<!-- autopilot-verdict .*? -->/, '');
+  assert.ok(!visibleText.includes('<!--'), 'no raw comment opener outside the marker');
+  assert.match(visibleText, /needs a developer/);
+});
