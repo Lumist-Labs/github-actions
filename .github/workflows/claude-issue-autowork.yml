@@ -1,117 +1,85 @@
 name: Claude Issue Autowork (shared)
 
-# Reusable workflow that scores a freshly opened issue and, if it is small and
-# safe enough, implements it on a branch and leaves a DRAFT pull request for a
-# human. Nothing merges without a person.
+# Reusable workflow that scores one issue in a target repo and, if it is small
+# and safe enough, implements it on a branch and leaves a DRAFT pull request
+# for a human. Nothing merges without a person.
+#
+# Beacon is the only caller. Its dispatcher (beacon/.github/workflows/
+# autowork.yml) passes the repo, the issue and the mode, plus that repo's
+# settings from autowork-repos.json. Target repos carry no autowork files. Plan:
+# beacon docs/features/auto-dev-loop/CONNECTING.md.
 #
 # Two jobs, and the split is the point:
 #
-#   score — reads the issue and the code, emits strict JSON (points, decision,
-#           branch, files, acceptance). Always comments. Labels the issue.
+#   score — reads the issue and the code, emits strict JSON (points, confidence,
+#           decision, branch, files, acceptance). Always comments. Labels the
+#           issue work, offer or needs-human.
 #   work  — runs ONLY when score said `work`. Branches, implements, commits,
 #           pushes, opens the draft PR.
 #
-# GUARDRAILS ARE TWO LAYERS. The scoring prompt refuses invariant-touching work,
-# AND a shell step independently re-checks the returned `files[]` against the
-# `blocked-paths` pattern and overrules the model. A prompt is not a security
-# boundary; treat the pattern as the boundary and the prompt as the fast path.
-# The work job re-checks a third time, against the diff that actually happened.
+# GUARDRAILS ARE LAYERS. The scoring prompt refuses invariant-touching work,
+# scripts/autowork-verdict.js independently re-checks the returned `files[]`
+# against `blocked-paths` and overrules the model, and the work job checks the
+# diff that actually happened. A prompt is not a security boundary.
 #
-# WHY A GITHUB APP TOKEN AND NOT GITHUB_TOKEN
-# -------------------------------------------
-# A pull request opened with the default GITHUB_TOKEN does not fire
-# `on: pull_request` in the consumer repo — by design, to stop workflows
-# recursing. That would mean every auto-PR arrived with no CI checks at all,
-# which defeats the review this whole workflow exists to feed. The PR is
-# therefore opened with a GitHub App installation token (the same
-# `lumist-release-bot` App that release-shared.yml uses to push to protected
-# main), whose PRs do trigger workflows.
+# TOKENS
+# ------
+# Every read and write on the target repo uses a `lumist-release-bot` App
+# installation token, because this workflow runs in the beacon repo and its
+# GITHUB_TOKEN cannot touch another repo. It is also why the PR fires the target's
+# `on: pull_request` CI: a GITHUB_TOKEN-opened PR would not. No Claude step has
+# a GitHub token in its environment, and the work job mints its write token only
+# after Claude exits — the App can push to protected `main` for
+# release-shared.yml and must never be in reach of a prompt-injected session.
 #
 # WHY THE WORK JOB RUNS NO TESTS
 # ------------------------------
-# Deliberate. `actions/setup-python` 404s on the self-hosted host (no manifest
-# for Arch — see docs/runbooks/runners-and-ci.md), so a toolchain step here is a
-# reliable way to fail every run for reasons unrelated to the change. The
-# consumer's own CI is the real gate, and it now runs on the PR because of the
-# App token above. If you later want pre-push gates, containerize this job in
-# ghcr.io/lumist-labs/ci-python-uv:3.12 the way the consumer's ci.yml does.
+# `actions/setup-python` 404s on the self-hosted host (no manifest for Arch —
+# see docs/runbooks/runners-and-ci.md). The target's own CI is the real gate.
+# Containerizing this job in ghcr.io/lumist-labs/ci-python-uv:3.12 is the
+# intended upgrade.
 #
 # AUTHENTICATION
 # --------------
 # ANTHROPIC_API_KEY resolves exactly as in claude-issue-triage.yml: GitHub OIDC
-# into Infisical (`lumist-labs-internal/prod/github-actions`, the shared CI key,
-# deliberately not any app's own folder), with a forwarded secret as the legacy
-# fallback. See that workflow's header for the full reasoning.
-#
-# REQUIRED CALLER PERMISSIONS
-# ---------------------------
-#   permissions:
-#     contents: read         # the push goes through the App token, not this one
-#     issues: write          # comments + labels
-#     id-token: write        # OIDC path for the Anthropic key
+# into Infisical (`lumist-labs-internal/prod/github-actions`), with a forwarded
+# secret as the legacy fallback.
 #
 # REQUIRED CALLER CONFIG
-#   vars.RELEASE_BOT_APP_ID           (or the `app-id` input)
-#   secrets.RELEASE_BOT_PRIVATE_KEY   — forward with `secrets: inherit`
-#   The App installation on the consumer repo needs contents:write and
-#   pull-requests:write.
-#   Labels the consumer repo must have: autowork, autowork-queued,
-#   autowork-offered, autoworked, needs-human.
-#
-# MINIMAL CONSUMER SHIM
-# ---------------------
-#   name: Claude Autowork
-#   on:
-#     issues:
-#       types: [opened, labeled]
-#   permissions:
-#     contents: read
-#     issues: write
-#     id-token: write
-#   jobs:
-#     autowork:
-#       uses: Lumist-Labs/github-actions/.github/workflows/claude-issue-autowork.yml@v2
-#       secrets: inherit
-#       with:
-#         runner: kenya
-#         base-branch: develop
-#         author-allowlist: areteintelligence
+#   permissions: { contents: read, id-token: write }
+#   vars.RELEASE_BOT_APP_ID (or the `app-id` input), and
+#   secrets.RELEASE_BOT_PRIVATE_KEY forwarded with `secrets: inherit`.
+#   The App installation on each TARGET repo needs contents, pull-requests and
+#   issues write. Each target needs the labels autowork-queued,
+#   autowork-offered, autoworked and needs-human.
 
 on:
   workflow_call:
     inputs:
-      author-allowlist:
+      repo:
+        description: 'Target repository, `owner/name`.'
+        required: true
+        type: string
+      issue:
+        description: 'Issue number in the target repository.'
+        required: true
+        type: number
+      mode:
         description: >-
-          Comma-separated GitHub logins whose newly opened issues are eligible,
-          no spaces (e.g. `areteintelligence,some-bot`). Empty — the default —
-          disables the on-open path entirely, leaving only the manual
-          `trigger-label`. This is the kill switch: clear it to stop autowork
-          without deleting the shim.
+          `auto` applies the thresholds. `override` is a Beacon admin's
+          trigger: it waives size, confidence and the model's own `review`,
+          never a blocked path or any other unsafe stop.
         required: false
         type: string
-        default: ''
-      trigger-label:
-        description: >-
-          Applying this label to any issue runs autowork on it, whoever filed
-          it. The manual escape hatch, and how you re-run after editing an issue.
-        required: false
+        default: auto
+      base-branch:
+        description: 'Branch to cut the work branch from and target the PR at.'
+        required: true
         type: string
-        default: autowork
-      label-senders:
-        description: >-
-          Comma-separated logins allowed to apply `trigger-label`, no spaces.
-          Set it to Beacon's account (`LumistBot`) so admin rights are checked
-          in Beacon. When set, the label also waives size and confidence, and a
-          label from anyone else is removed with a comment. Empty keeps the
-          label open to anyone with triage access, with thresholds enforced.
-        required: false
-        type: string
-        default: ''
       max-points:
         description: >-
-          Highest Fibonacci score that still auto-works. Anything above it gets
-          the score comment and a human. Start at 2 (trivial and small only) and
-          raise it once the PRs are boring.
+          Highest Fibonacci score that still auto-works. Start at 2 and raise
+          it once the PRs are boring.
         required: false
         type: number
         default: 2
@@ -126,27 +94,18 @@ on:
       blocked-paths:
         description: >-
           Extended-regex, matched case-insensitively against every path the
-          scorer reports and again against the diff that actually happens. One
-          hit forces a human, whatever the score. This is the real guardrail —
-          the prompt is only the fast path. Broad by design: a false positive
-          costs one human review, a false negative costs an unreviewed change to
-          an invariant.
+          scorer reports and again against the real diff. One hit forces a
+          human, whatever the mode. Broad by design: a false positive costs one
+          human review, a false negative costs an unreviewed change to an
+          invariant.
         required: false
         type: string
         default: '(^alembic/)|(^\.github/)|(^docker-compose)|(^Dockerfile)|(auth)|(scope)|(policy)|(vault)|(approval)|(audit)|(secret)|(credential)|(permission)|(security)|(migration)'
-      base-branch:
-        description: >-
-          Branch to cut the work branch from and target the PR at. Defaults to
-          the consumer's own default branch, so repos on develop work without
-          configuration.
-        required: false
-        type: string
-        default: ''
       branch-prefixes:
         description: >-
-          Pipe-separated branch type prefixes the scorer is allowed to pick. A
-          prefix outside the consumer's CI branch filter would give the PR no
-          checks at all, silently — so this is validated, not trusted.
+          Pipe-separated branch type prefixes the scorer may pick. A prefix
+          outside the target's CI branch filter would give the PR no checks at
+          all, silently — so this is validated, not trusted.
         required: false
         type: string
         default: 'feat|feature|fix|refactor|chore|test'
@@ -172,9 +131,10 @@ on:
         default: 60
       shared-ref:
         description: >-
-          Ref of Lumist-Labs/github-actions to pull the system prompts from.
-          MUST track this workflow's own major tag — see claude-issue-triage.yml,
-          where a stale default ran v2 logic against a frozen v1 prompt.
+          Ref of Lumist-Labs/github-actions to pull the prompts and verdict
+          script from. MUST track this workflow's own major tag — see
+          claude-issue-triage.yml, where a stale default ran v2 logic against a
+          frozen v1 prompt.
         required: false
         type: string
         default: v2
@@ -184,9 +144,7 @@ on:
         type: string
         default: ''
       runner:
-        description: >-
-          GitHub-hosted image name or a self-hosted runner label (e.g. `kenya`).
-          The hosted default is the fail-back when the self-hosted box is down.
+        description: 'GitHub-hosted image name or a self-hosted runner label (e.g. `kenya`).'
         required: false
         type: string
         default: ubuntu-latest
@@ -217,58 +175,22 @@ on:
         description: 'Anthropic API key. Required UNLESS the OIDC path resolves one.'
         required: false
       RELEASE_BOT_PRIVATE_KEY:
-        description: 'Private key of the GitHub App that opens the PR. Required for the work job.'
-        required: false
+        description: 'Private key of the GitHub App that acts on the target repo.'
+        required: true
 
-# One autowork per issue. Unlike triage, `cancel-in-progress` is FALSE: a cancel
-# landing between `git push` and `gh pr create` leaves an orphan branch and no
-# PR, which is worse than a duplicate run — and the guard step already no-ops a
-# second run.
+# One autowork per issue. `cancel-in-progress` is FALSE because a cancel landing
+# between `git push` and `gh pr create` leaves an orphan branch and no PR, and
+# the guard step already no-ops a second run.
 concurrency:
-  group: autowork-${{ github.repository }}-${{ github.event.issue.number }}
+  group: autowork-${{ inputs.repo }}-${{ inputs.issue }}
   cancel-in-progress: false
 
 jobs:
-  # Otherwise a label from someone outside label-senders just does nothing,
-  # and the person who added it can't tell whether autowork is broken.
-  reject-label:
-    if: >-
-      github.event.action == 'labeled' && github.event.label.name == inputs.trigger-label &&
-      inputs.label-senders != '' &&
-      !contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login))
-    runs-on: ${{ inputs.runner }}
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Remove the label and say who can trigger
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
-          LABEL: ${{ inputs.trigger-label }}
-          SENDER: ${{ github.event.sender.login }}
-          SENDERS: ${{ inputs.label-senders }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          gh issue edit "$ISSUE" -R "$REPO" --remove-label "$LABEL"
-          gh issue comment "$ISSUE" -R "$REPO" --body "@${SENDER} the \`${LABEL}\` label only starts autowork when it comes from ${SENDERS}. Use the Autowork button in Beacon instead. The label has been removed."
-
   score:
-    # The on-open path needs an allowlisted author; the label path needs nothing
-    # but the label, so a human can always pull an issue into autowork by hand.
-    # Comma-wrapping both sides stops `bot` matching `robot`.
-    if: >-
-      (github.event.action == 'opened' && inputs.author-allowlist != '' &&
-       contains(format(',{0},', inputs.author-allowlist), format(',{0},', github.event.issue.user.login)))
-      || (github.event.action == 'labeled' && github.event.label.name == inputs.trigger-label &&
-          (inputs.label-senders == '' ||
-           contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login))))
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.environment }}
     timeout-minutes: 20
-    # `npm install -g` assumes a hosted runner's preinstalled npm and writable
-    # HOME; neither holds once `runner:` names a self-hosted label. The `runner`
+    # `npm install -g` assumes a hosted runner's writable prefix. The `runner`
     # context is unavailable in job-level env — using it here does not warn, it
     # makes the whole workflow invalid. Hence `github.workspace`.
     env:
@@ -276,7 +198,6 @@ jobs:
       npm_config_prefix: ${{ github.workspace }}/.npm-global
     permissions:
       contents: read
-      issues: write
       id-token: write
     outputs:
       proceed: ${{ steps.guard.outputs.proceed }}
@@ -284,39 +205,87 @@ jobs:
       points: ${{ steps.verdict.outputs.points }}
       branch: ${{ steps.verdict.outputs.branch }}
     steps:
-      - name: Checkout consumer repository
+      # Checked before anything else because `repo` feeds token scoping, git
+      # URLs and every gh call below.
+      - name: Validate inputs
+        id: target
+        env:
+          REPO: ${{ inputs.repo }}
+          MODE: ${{ inputs.mode }}
+          APP_ID: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "::error::repo must be owner/name, got '$REPO'"; exit 1
+          fi
+          if [ "$MODE" != auto ] && [ "$MODE" != override ]; then
+            echo "::error::mode must be auto or override, got '$MODE'"; exit 1
+          fi
+          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
+            echo "::error::Set vars.RELEASE_BOT_APP_ID (or the app-id input) and forward secrets.RELEASE_BOT_PRIVATE_KEY via 'secrets: inherit'."
+            exit 1
+          fi
+          echo "owner=${REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a GitHub App token for the target repo
+        id: bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-contents: read
+          permission-issues: write
+
+      # Never work the same issue twice. Either marker is enough on its own: the
+      # label survives a branch deletion, the branch survives a stripped label.
+      # Each lookup is captured before grep because inside an `if`, a failed gh
+      # call would read as "no match" and let a repeat run through.
+      - name: Guard against a repeat run
+        id: guard
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
+        run: |
+          set -euo pipefail
+          STATE=$(gh issue view "$ISSUE" -R "$REPO" --json state -q .state)
+          LABELS=$(gh issue view "$ISSUE" -R "$REPO" --json labels -q '.labels[].name')
+          BRANCHES=$(gh api --paginate "repos/$REPO/branches?per_page=100" -q '.[].name')
+          if [ "$STATE" != OPEN ]; then
+            echo "Issue #$ISSUE is $STATE — nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if grep -qx 'autoworked' <<< "$LABELS"; then
+            echo "Issue #$ISSUE is already labelled autoworked — nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if grep -qE "^[^/]+/${ISSUE}-" <<< "$BRANCHES"; then
+            echo "A branch for issue #$ISSUE already exists — nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout target repository
+        if: steps.guard.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base-branch || github.event.repository.default_branch }}
-          fetch-depth: 0
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.base-branch }}
+          token: ${{ steps.bot.outputs.token }}
+          persist-credentials: false
 
       - name: Checkout shared workflow assets (prompts and verdict parser)
+        if: steps.guard.outputs.proceed == 'true'
         uses: actions/checkout@v4
         with:
           repository: Lumist-Labs/github-actions
           ref: ${{ inputs.shared-ref }}
           path: .shared-actions
-
-      # Never work the same issue twice. Either marker is enough on its own: the
-      # label survives a branch deletion, the branch survives a stripped label.
-      - name: Guard against a repeat run
-        id: guard
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
-        run: |
-          set -euo pipefail
-          if gh issue view "$ISSUE" --json labels -q '.labels[].name' | grep -qx 'autoworked'; then
-            echo "Issue #$ISSUE is already labelled autoworked — nothing to do."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git ls-remote --heads origin | grep -qE "refs/heads/[^/]+/${ISSUE}-"; then
-            echo "A branch for issue #$ISSUE already exists — nothing to do."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "proceed=true" >> "$GITHUB_OUTPUT"
+          persist-credentials: false
 
       - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
         if: ${{ steps.guard.outputs.proceed == 'true' && (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
@@ -340,23 +309,9 @@ jobs:
           elif [ -n "$FORWARDED_KEY" ]; then
             echo "ANTHROPIC_API_KEY resolved via forwarded secret (legacy path)."
           else
-            echo "::error::No ANTHROPIC_API_KEY available. For the OIDC path this repo needs: (1) the org variable INFISICAL_OIDC_IDENTITY_ID visible to it, (2) the OIDC identity trusted for this repo, and (3) read access on lumist-labs-internal/<env>/github-actions. Otherwise forward ANTHROPIC_API_KEY via the caller's secrets block."
+            echo "::error::No ANTHROPIC_API_KEY available. For the OIDC path the calling repo needs vars.INFISICAL_OIDC_IDENTITY_ID, the identity trusted for it, and read access on lumist-labs-internal/<env>/github-actions. Otherwise forward ANTHROPIC_API_KEY."
             exit 1
           fi
-
-      # Checked here rather than in the work job so a misconfigured App fails
-      # before we spend a scoring pass on an issue we could never open a PR for.
-      - name: Verify the GitHub App is configured
-        if: steps.guard.outputs.proceed == 'true'
-        env:
-          APP_ID: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
-          APP_KEY: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-        run: |
-          if [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]; then
-            echo "::error::The work job needs a GitHub App to open a PR that actually triggers CI. Set vars.RELEASE_BOT_APP_ID (or the app-id input) and forward secrets.RELEASE_BOT_PRIVATE_KEY via 'secrets: inherit'. The App installation on this repo needs contents:write and pull-requests:write."
-            exit 1
-          fi
-          echo "GitHub App configured."
 
       - uses: actions/setup-node@v4
         if: steps.guard.outputs.proceed == 'true'
@@ -373,27 +328,29 @@ jobs:
       - name: Acknowledge trigger
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh api "repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/reactions" -f content=eyes
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
+        run: gh api "repos/$REPO/issues/$ISSUE/reactions" -f content=eyes
 
       - name: Get issue info
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
           # Title and body go through files, never through $GITHUB_OUTPUT into a
           # later `run:` — a backtick or $(...) in an issue title would otherwise
-          # be shell injection straight into the runner, from anyone who can
-          # file an issue.
-          gh issue view "$ISSUE" --json title -q .title > /tmp/issue-title.txt
-          gh issue view "$ISSUE" --json body -q .body > /tmp/issue-body.txt
+          # be shell injection straight into the runner.
+          gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
+          gh issue view "$ISSUE" -R "$REPO" --json body -q .body > /tmp/issue-body.txt
 
       - name: Build scoring prompt
         if: steps.guard.outputs.proceed == 'true'
         env:
-          ISSUE: ${{ github.event.issue.number }}
+          ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
           {
@@ -443,23 +400,18 @@ jobs:
           echo "::group::Claude stderr"; cat /tmp/score-stderr.log || true; echo "::endgroup::"
           echo "::group::Raw scoring output"; cat /tmp/score-raw.txt; echo "::endgroup::"
 
-      # Node, not jq — jq is not guaranteed on the self-hosted host, and node is
-      # installed two steps up anyway. This is where the model gets overruled:
-      # the blocked-paths pattern, the branch-prefix list and the point
-      # threshold are all enforced here, against the returned file list, rather
-      # than taken on trust.
+      # This is where the model gets overruled: blocked paths, branch prefixes,
+      # thresholds and the override are enforced here, not taken on trust.
       - name: Parse and enforce the verdict
         id: verdict
         if: steps.guard.outputs.proceed == 'true'
         env:
           MAX_POINTS: ${{ inputs.max-points }}
           OFFER_MAX_POINTS: ${{ inputs.offer-max-points }}
-          # Sender re-checked here rather than trusting the job's `if:` alone,
-          # because this is what lets a run skip the thresholds.
-          OVERRIDE: ${{ github.event.action == 'labeled' && inputs.label-senders != '' && contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login)) }}
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
           BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
-          ISSUE: ${{ github.event.issue.number }}
+          OVERRIDE: ${{ inputs.mode == 'override' }}
+          ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
           node .shared-actions/scripts/autowork-verdict.js \
@@ -469,34 +421,36 @@ jobs:
       - name: Comment the verdict and label the issue
         if: steps.guard.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
           DECISION: ${{ steps.verdict.outputs.decision }}
         run: |
           set -euo pipefail
-          gh issue comment "$ISSUE" --body-file /tmp/verdict-comment.md
-          # Strip every outcome label before adding one, so a re-run after an
-          # issue edit never leaves the issue claiming two. Beacon reads these.
+          gh issue comment "$ISSUE" -R "$REPO" --body-file /tmp/verdict-comment.md
+          # Strip every outcome label before adding one, so a re-run never
+          # leaves the issue claiming two. Beacon's webhook reads these.
           case "$DECISION" in
             work)  ADD=autowork-queued ;;
             offer) ADD=autowork-offered ;;
             *)     ADD=needs-human ;;
           esac
           for L in autowork-queued autowork-offered needs-human; do
-            [ "$L" = "$ADD" ] || gh issue edit "$ISSUE" --remove-label "$L" >/dev/null 2>&1 || true
+            [ "$L" = "$ADD" ] || gh issue edit "$ISSUE" -R "$REPO" --remove-label "$L" >/dev/null 2>&1 || true
           done
-          gh issue edit "$ISSUE" --add-label "$ADD" || true
+          gh issue edit "$ISSUE" -R "$REPO" --add-label "$ADD" || true
 
       # Otherwise a failed scoring pass leaves only an `eyes` reaction behind.
       - name: Hand back to a human on failure
-        if: failure() && steps.guard.outputs.proceed == 'true'
+        if: failure() && steps.bot.outputs.token != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" --body "Autowork could not score this issue: ${RUN_URL}. Nothing was changed. Over to a human." || true
-          gh issue edit "$ISSUE" --add-label needs-human || true
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork could not score this issue: ${RUN_URL}. Nothing was changed. Over to a human." || true
+          gh issue edit "$ISSUE" -R "$REPO" --add-label needs-human || true
 
   work:
     needs: score
@@ -504,20 +458,40 @@ jobs:
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.environment }}
     timeout-minutes: 45
-    # Read-only on contents because the push and the PR go through the App
-    # token, minted only after Claude has exited.
     permissions:
       contents: read
-      issues: write
       id-token: write
     steps:
+      - name: Split the target repo
+        id: target
+        env:
+          REPO: ${{ inputs.repo }}
+        run: |
+          echo "owner=${REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${REPO#*/}" >> "$GITHUB_OUTPUT"
+
+      # Read-only, because it exists while Claude runs. The write token is
+      # minted after Claude exits.
+      - name: Mint a read-only App token
+        id: reader
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-contents: read
+          permission-issues: read
+
       # persist-credentials false because Claude runs with bypassPermissions on
       # an untrusted issue body, and a token left in .git/config is one it can
-      # push with.
-      - name: Checkout consumer repository
+      # use.
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base-branch || github.event.repository.default_branch }}
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.base-branch }}
+          token: ${{ steps.reader.outputs.token }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -555,6 +529,15 @@ jobs:
           environment: ${{ inputs.infisical-env || 'prod' }}
           path: ${{ inputs.infisical-path || '/github-actions' }}
 
+      - name: Verify an API key resolved
+        env:
+          FORWARDED_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "$FORWARDED_KEY" ]; then
+            echo "::error::No ANTHROPIC_API_KEY available in the work job, though the score job had one. Check the Infisical OIDC identity still trusts this repo."
+            exit 1
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -570,14 +553,15 @@ jobs:
 
       - name: Build implementation prompt
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ steps.reader.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
         run: |
           set -euo pipefail
-          gh issue view "$ISSUE" --json title -q .title > /tmp/issue-title.txt
-          gh issue view "$ISSUE" --json body -q .body > /tmp/issue-body.txt
+          gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
+          gh issue view "$ISSUE" -R "$REPO" --json body -q .body > /tmp/issue-body.txt
           # Re-read from the score comment so the two jobs share no filesystem.
-          gh issue view "$ISSUE" --json comments \
+          gh issue view "$ISSUE" -R "$REPO" --json comments \
             -q '[.comments[] | select(.body | contains("<!-- autowork-verdict -->"))] | last | .body' \
             > /tmp/verdict-comment.md
           {
@@ -655,12 +639,14 @@ jobs:
           fi
 
       # Minted only now, so no token that can push existed while Claude ran.
-      - name: Mint a GitHub App token
+      - name: Mint a write App token
         id: bot
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
@@ -668,12 +654,14 @@ jobs:
       - name: Commit, push and open the draft PR
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
-          ISSUE: ${{ github.event.issue.number }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
           BRANCH: ${{ needs.score.outputs.branch }}
           POINTS: ${{ needs.score.outputs.points }}
-          BASE: ${{ inputs.base-branch || github.event.repository.default_branch }}
+          MODE: ${{ inputs.mode }}
+          BASE: ${{ inputs.base-branch }}
           BASE_SHA: ${{ steps.prep.outputs.base }}
-          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           TITLE=$(cat /tmp/issue-title.txt)
@@ -699,37 +687,50 @@ jobs:
 
           git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
 
+          if [ "$MODE" = override ]; then WHY="a Beacon admin started it"; else WHY="it scored **${POINTS} points**"; fi
           {
-            echo "> Opened automatically by [autowork](https://github.com/Lumist-Labs/github-actions/blob/main/.github/workflows/claude-issue-autowork.yml)"
-            echo "> because issue #${ISSUE} scored **${POINTS} points**."
+            echo "> Opened automatically by [autowork](${RUN_URL}) because ${WHY}."
             echo ">"
             echo "> **Draft on purpose.** No tests or lint ran before this push — the checks"
             echo "> on this pull request are the first verification it has had. Review it as"
             echo "> you would any other PR, and then some."
             echo ""
-            # In the body, outside the blockquote, because areteos-py's
-            # close-issues-on-develop.yml greps the PR body, not the commit.
+            # In the body, outside the blockquote, because close-issues-on-develop
+            # greps the PR body, not the commit.
             echo "Closes #${ISSUE}"
             echo ""
             cat /tmp/pr-body.md
           } > /tmp/pr-final.md
 
-          URL=$(gh pr create \
+          URL=$(gh pr create -R "$REPO" \
             --draft \
             --base "$BASE" \
             --head "$BRANCH" \
             --title "${TYPE}: #${ISSUE} ${TITLE}" \
             --body-file /tmp/pr-final.md)
-          gh issue comment "$ISSUE" --body "Autowork opened a draft pull request: ${URL}"
-          gh issue edit "$ISSUE" --remove-label autowork-queued --add-label autoworked || true
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork opened a draft pull request: ${URL}"
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label autoworked || true
 
-      # A half-finished run must not sit there looking queued.
+      # Its own token, because a failure before the write token was minted
+      # would otherwise leave the issue sitting there looking queued.
+      - name: Mint a token for the failure handback
+        id: rescue
+        if: failure()
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-issues: write
+
       - name: Hand back to a human on failure
         if: failure()
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ steps.rescue.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" --body "Autowork scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a human." || true
-          gh issue edit "$ISSUE" --remove-label autowork-queued --add-label needs-human || true
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a human." || true
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label needs-human || true
