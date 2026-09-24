@@ -24,6 +24,7 @@ More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own compos
 | [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render Infisical folder → dotenv → write to VPS over ssh → docker compose up → healthcheck. Callers become ~15-line shims. | `v2` |
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Auto-triage of new issues / `@claude` comments via Claude Code. Bundled system prompt at `.claude/prompts/ci-triage.md`. Callers pass **no inputs at all** — see [zero-config shim](#zero-config-consumer-shim). | `v2` |
 | [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. On PRs into `main`: Claude summary → PR body + Closes #N → request `core` review → Teams card. | `v2` |
+| [`claude-issue-autowork.yml`](.github/workflows/claude-issue-autowork.yml) | Score a new issue from an allowlisted author; if it is small and touches nothing protected, implement it and open a **draft** PR. Otherwise comment and hand it to a human. Needs a GitHub App — see [`docs/runbooks/issue-autowork.md`](docs/runbooks/issue-autowork.md). | `v2` |
 
 Reusable workflows are called via `jobs.<name>.uses: Lumist-Labs/github-actions/.github/workflows/<file>@v1` in the consumer repo. See the workflow file's header comments for inputs and prerequisites.
 
