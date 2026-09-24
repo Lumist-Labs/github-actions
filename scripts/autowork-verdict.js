@@ -78,7 +78,7 @@ if (parseError) {
   unsafe.push(`the scoring pass did not return usable JSON (${parseError})`);
 }
 if (parsed.decision !== 'work' && !blockedReason) {
-  judged.push(reason || 'the scoring pass chose human review');
+  judged.push(reason || 'the scoring pass chose developer review');
 }
 if (!parseError && !validPoints) {
   unsafe.push(`points ${JSON.stringify(parsed.points)} is not on the 1/2/3/5/8/13 scale`);
@@ -138,13 +138,13 @@ fs.writeFileSync(
 const DECISION_TEXT = {
   work: 'implement it — a draft PR is on the way',
   offer: 'offered — waiting for a Beacon admin to start it',
-  review: 'human review',
+  review: 'developer review',
 };
 
 const md = [];
 // Marker the work job greps for when it re-reads this comment as its brief.
 md.push('<!-- autowork-verdict -->');
-md.push('### Autowork score');
+md.push('### Autopilot score');
 md.push('');
 md.push('| | |');
 md.push('|---|---|');
@@ -171,7 +171,7 @@ if (acceptance.length) {
   md.push('');
 }
 if (decision === 'review') {
-  md.push('**Why this needs a person:**');
+  md.push('**Why this needs a developer:**');
   md.push('');
   objections.forEach((o) => md.push(`- ${o}`));
   md.push('');

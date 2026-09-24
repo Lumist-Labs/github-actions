@@ -1,4 +1,4 @@
-name: Claude Issue Autowork (shared)
+name: Claude Issue Autopilot (shared)
 
 # Reusable workflow that scores one issue in a target repo and, if it is small
 # and safe enough, implements it on a branch and leaves a DRAFT pull request
@@ -458,7 +458,7 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork could not score this issue: ${RUN_URL}. Nothing was changed. Over to a human." || true
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot could not score this issue: ${RUN_URL}. Nothing was changed. Over to a developer." || true
           gh issue edit "$ISSUE" -R "$REPO" --add-label needs-human || true
 
       # Root in the container writes uid-0 files into the host's workspace; hand
@@ -698,7 +698,7 @@ jobs:
           {
             echo "${TYPE}: #${ISSUE} ${TITLE}"
             echo ""
-            echo "Implemented unsupervised by the autowork workflow and left as a draft"
+            echo "Implemented unsupervised by Autopilot and left as a draft"
             echo "for review. Nothing here was verified locally — CI on this pull request"
             echo "is the first real check."
             echo ""
@@ -713,7 +713,7 @@ jobs:
 
           if [ "$MODE" = override ]; then WHY="a Beacon admin started it"; else WHY="it scored **${POINTS} points**"; fi
           {
-            echo "> Opened automatically by [autowork](${RUN_URL}) because ${WHY}."
+            echo "> Opened automatically by [Autopilot](${RUN_URL}) because ${WHY}."
             echo ">"
             echo "> **Draft on purpose.** No tests or lint ran before this push — the checks"
             echo "> on this pull request are the first verification it has had. Review it as"
@@ -732,7 +732,7 @@ jobs:
             --head "$BRANCH" \
             --title "${TYPE}: #${ISSUE} ${TITLE}" \
             --body-file /tmp/pr-final.md)
-          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork opened a draft pull request: ${URL}"
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot opened a draft pull request: ${URL}"
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label autoworked || true
 
       # Its own token, because a failure before the write token was minted
@@ -756,7 +756,7 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" -R "$REPO" --body "Autowork scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a human." || true
+          gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a developer." || true
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autowork-queued --add-label needs-human || true
 
       - name: Return the workspace to the runner user
