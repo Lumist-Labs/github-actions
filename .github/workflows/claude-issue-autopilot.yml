@@ -48,11 +48,15 @@ name: Claude Issue Autopilot (shared)
 #
 # REQUIRED CALLER CONFIG
 #   permissions: { contents: read, id-token: write }
-#   vars.RELEASE_BOT_APP_ID (or the `app-id` input), and
-#   secrets.RELEASE_BOT_PRIVATE_KEY forwarded with `secrets: inherit`.
-#   The App installation on each TARGET repo needs contents, pull-requests and
-#   issues write. Each target needs the labels autopilot-queued,
-#   autopilot-offered, autopiloted and needs-human.
+#   Either the App: vars.RELEASE_BOT_APP_ID (or the `app-id` input) and
+#   secrets.RELEASE_BOT_PRIVATE_KEY, installed on the TARGET repo with
+#   contents, pull-requests and issues write;
+#   or TARGET_REPO_TOKEN for an org where the App isn't installed. That token
+#   is live for the whole work job rather than minted after Claude exits, so on
+#   that path the guarantee is narrower: it is never in a Claude step's
+#   environment and never left in the checkout, but it isn't scoped to after.
+#   Each target needs the labels autopilot-queued, autopilot-offered,
+#   autopiloted and needs-human.
 
 on:
   workflow_call:
