@@ -44,6 +44,13 @@ named error if any is missing:
 - The labels `autowork`, `autowork-queued`, `autowork-offered`, `autoworked` and
   `needs-human`.
 
+Set `label-senders: LumistBot` so only Beacon can trigger by label. Beacon
+checks the admin role before it adds the label, so admin rights live in one
+place. From an allowed sender the label waives size, confidence and the model's
+own `review`. It never waives blocked paths, unparseable output, missing files
+or acceptance criteria, or a bad branch. A label from anyone else is removed
+with a comment.
+
 `author-allowlist` is the kill switch. Clearing it disables the on-open path
 entirely and leaves only the manual `autowork` label, without deleting the shim.
 

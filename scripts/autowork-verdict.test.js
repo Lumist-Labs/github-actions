@@ -19,7 +19,7 @@ const GOOD = {
   acceptance: ['page renders with no items'],
 };
 
-function run(raw) {
+function run(raw, env = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-'));
   const rawPath = path.join(dir, 'raw.txt');
   const outputPath = path.join(dir, 'output');
@@ -34,6 +34,7 @@ function run(raw) {
       BRANCH_PREFIXES: 'feat|fix',
       ISSUE: '7',
       GITHUB_OUTPUT: outputPath,
+      ...env,
     },
   });
   return {
@@ -107,4 +108,35 @@ test('offer comment names the soft reasons', () => {
   assert.match(comment, /offered rather than automatic/);
   assert.match(comment, /above the 2-point autowork threshold/);
   assert.match(comment, /medium confidence/);
+});
+
+const overridden = (raw) => run(raw, { OVERRIDE: 'true' }).verdict.decision;
+
+test('an admin trigger waives size, confidence and the model saying review', () => {
+  assert.equal(overridden({ ...GOOD, points: 8 }), 'work');
+  assert.equal(overridden({ ...GOOD, confidence: 'low' }), 'work');
+  assert.equal(overridden({ ...GOOD, confidence: 'medium', points: 3 }), 'work');
+  assert.equal(overridden({ ...GOOD, decision: 'review', reason: 'too big' }), 'work');
+});
+
+test('an admin trigger never waives an unsafe stop', () => {
+  assert.equal(overridden({ ...GOOD, files: ['src/auth/session.py'] }), 'review');
+  assert.equal(overridden({ ...GOOD, files: [] }), 'review');
+  assert.equal(overridden({ ...GOOD, acceptance: [] }), 'review');
+  assert.equal(overridden({ ...GOOD, blocked_reason: 'touches the vault' }), 'review');
+  assert.equal(overridden({ ...GOOD, branch: 'docs/7-x' }), 'review');
+  assert.equal(overridden({ ...GOOD, branch: 'fix/8-x' }), 'review');
+  assert.equal(overridden({ ...GOOD, points: null }), 'review');
+  assert.equal(overridden('no json here'), 'review');
+});
+
+test('override comment lists what was waived', () => {
+  const { comment, verdict } = run({ ...GOOD, points: 5, confidence: 'medium' }, { OVERRIDE: 'true' });
+  assert.match(comment, /Started by a Beacon admin, waiving/);
+  assert.match(comment, /above the 3-point offer threshold/);
+  assert.equal(verdict.waived.length, 2);
+});
+
+test('only the literal string true overrides', () => {
+  assert.equal(run({ ...GOOD, points: 8 }, { OVERRIDE: '1' }).verdict.decision, 'review');
 });

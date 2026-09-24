@@ -97,6 +97,16 @@ on:
         required: false
         type: string
         default: autowork
+      label-senders:
+        description: >-
+          Comma-separated logins allowed to apply `trigger-label`, no spaces.
+          Set it to Beacon's account (`LumistBot`) so admin rights are checked
+          in Beacon. When set, the label also waives size and confidence, and a
+          label from anyone else is removed with a comment. Empty keeps the
+          label open to anyone with triage access, with thresholds enforced.
+        required: false
+        type: string
+        default: ''
       max-points:
         description: >-
           Highest Fibonacci score that still auto-works. Anything above it gets
@@ -219,6 +229,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Otherwise a label from someone outside label-senders just does nothing,
+  # and the person who added it can't tell whether autowork is broken.
+  reject-label:
+    if: >-
+      github.event.action == 'labeled' && github.event.label.name == inputs.trigger-label &&
+      inputs.label-senders != '' &&
+      !contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login))
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Remove the label and say who can trigger
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABEL: ${{ inputs.trigger-label }}
+          SENDER: ${{ github.event.sender.login }}
+          SENDERS: ${{ inputs.label-senders }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label "$LABEL"
+          gh issue comment "$ISSUE" -R "$REPO" --body "@${SENDER} the \`${LABEL}\` label only starts autowork when it comes from ${SENDERS}. Use the Autowork button in Beacon instead. The label has been removed."
+
   score:
     # The on-open path needs an allowlisted author; the label path needs nothing
     # but the label, so a human can always pull an issue into autowork by hand.
@@ -226,7 +261,9 @@ jobs:
     if: >-
       (github.event.action == 'opened' && inputs.author-allowlist != '' &&
        contains(format(',{0},', inputs.author-allowlist), format(',{0},', github.event.issue.user.login)))
-      || (github.event.action == 'labeled' && github.event.label.name == inputs.trigger-label)
+      || (github.event.action == 'labeled' && github.event.label.name == inputs.trigger-label &&
+          (inputs.label-senders == '' ||
+           contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login))))
     runs-on: ${{ inputs.runner }}
     environment: ${{ inputs.environment }}
     timeout-minutes: 20
@@ -417,6 +454,9 @@ jobs:
         env:
           MAX_POINTS: ${{ inputs.max-points }}
           OFFER_MAX_POINTS: ${{ inputs.offer-max-points }}
+          # Sender re-checked here rather than trusting the job's `if:` alone,
+          # because this is what lets a run skip the thresholds.
+          OVERRIDE: ${{ github.event.action == 'labeled' && inputs.label-senders != '' && contains(format(',{0},', inputs.label-senders), format(',{0},', github.event.sender.login)) }}
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
           BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
           ISSUE: ${{ github.event.issue.number }}
