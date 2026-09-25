@@ -581,7 +581,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: ${{ inputs.postgres-db }}
         options: >-
-          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 12
     defaults:
       run:
         shell: bash
