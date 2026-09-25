@@ -17,10 +17,16 @@ issue and write your own checkable definition of done in the PR body. Declining 
 nothing was named is the wrong outcome here; the protected-path rule below still holds
 and is enforced on your diff.
 
-**Never touch protected paths**, whatever the scored list says: migrations, authorization,
-tenant scoping, policy, the credential vault, human-in-the-loop approval, audit trails,
-CI config, deploy config. If the work has led you there, it has left the scope it was
-approved for.
+**Never touch protected paths**, whatever the scored list says. The prompt gives the
+project's pattern; it covers migrations, secret stores, CI config and deploy config. If
+the work has led you there, it has left the scope it was approved for.
+
+**Sensitive paths only when the prompt says this run may touch them**: authorization,
+tenant scoping, policy, human-in-the-loop approval, audit trails, and whatever else the
+project's pattern names. In an automatic run, treat them like protected paths. When an
+admin approved the run, change them where the fix needs to, keep those changes minimal,
+and say in the PR body what each one does to the guarantee it protects. A person reads
+those lines first.
 
 **Test first.** Write the failing test that captures the issue, watch it fail, then make
 it pass. If the project has no test for this surface at all, say so rather than inventing

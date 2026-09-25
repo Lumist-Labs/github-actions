@@ -18,21 +18,24 @@ unsupervised change and runs only when Beacon asks.
 ## Modes
 
 - `auto` — Beacon dispatches it on promote. The thresholds apply.
-- `override` — a Beacon admin's Autopilot button. It waives size, confidence and
-  the model's own `review`. It never waives blocked paths, unparseable output,
-  invalid points, missing files or acceptance criteria, or a bad branch.
+- `override` — a Beacon admin's Start anyway. It waives size, confidence,
+  sensitive paths and the model's own `review`. It never waives blocked paths,
+  unparseable output, invalid points or a bad branch.
+- `fix` — Beacon dispatches it when an Autopilot PR's CI fails. It pushes to that
+  PR's branch; at most two per PR.
 
 Only Beacon holds a token that can dispatch, so admin rights live in Beacon and
 nowhere else.
 
 ## Adding a repo
 
-- Add it to `beacon/.github/autopilot-repos.json` with its base branch, runner and
-  `blocked-paths`. Test the pattern against the repo's tree before relying on it.
+- Add it to `beacon/.github/autopilot-repos.json` with its base branch, runner,
+  `blocked-paths` and `sensitive-paths`. Check both against the repo's tree with
+  `node scripts/autopilot-paths-audit.js <autopilot-repos.json> <owner/repo>`.
 - Install `lumist-release-bot` on the repo with contents, pull-requests and
   issues write. A repo in another org needs that org's own installation.
-- Create the labels `autopilot-queued`, `autopilot-offered`, `autopiloted` and
-  `needs-human`.
+- Create the labels `autopilot-queued`, `autopilot-offered`, `autopiloted`,
+  `autopilot-already-fixed`, `autopilot-sensitive` and `needs-human`.
 - Confirm the repo's CI `pull_request` filter covers every `branch-prefixes`
   entry.
 
@@ -70,6 +73,7 @@ Confidence missing or unrecognised counts as low. These are hard stops, always
 |---|---|
 | `points > offer-max-points`, or confidence low | The thresholds are the operator's call, not the model's |
 | any reported path matches `blocked-paths` | A model that was talked into `decision: "work"` cannot also talk its way past a regex |
+| any reported path matches `sensitive-paths` | Same, but a person may decide to build it: Start anyway waives this one |
 | no files, or no acceptance criteria | Nothing was actually authorized, and there is no definition of done |
 | branch prefix outside `branch-prefixes` | A prefix outside the target repo's CI branch filter gives the PR no checks, silently |
 | branch missing the issue number | The repeat-run guard matches on it |
@@ -78,18 +82,25 @@ Confidence missing or unrecognised counts as low. These are hard stops, always
 The comment posted to the issue lists whichever of these fired, so "why didn't it
 work this one" is answerable without opening the run log.
 
-`work` then checks the same pattern a third time, against the diff that actually
-happened on disk, and refuses to push on a hit. Three layers because the first
-two are both statements of intent and only the third is a fact.
+`work` then checks both patterns a third time, against the diff that actually
+happened on disk. A blocked hit refuses the push in every mode. A sensitive hit
+refuses it in `auto`. In `override` and `fix` it pushes, labels the PR
+`autopilot-sensitive` and lists the files at the top of the PR body. Three layers
+because the first two are both statements of intent and only the third is a fact.
+A pattern `grep -E` can't compile stops the push too, since JS accepts syntax
+(lookarounds) that ERE doesn't.
 
-`blocked-paths` is broad on purpose: a false positive costs one human review, a
-false negative costs an unreviewed change to something load-bearing. Narrow it
-per repo if it is catching too much, but narrow it deliberately.
+The two lists do different jobs. `blocked-paths` is what a bot never writes:
+CI, container and deploy config, lockfiles, migrations, secret stores.
+`sensitive-paths` is what a person decides on: auth, tenancy, policy, audit,
+redaction, a core runtime. Write both from the repo's CLAUDE.md invariants, as
+path segments (`(^|[/_.-])auth([/_.-]|$)`) rather than substrings, which also hit
+`authored_fallback.ex`. Keywords are per repo; bd-pulse's "credentials" are team
+members' deal experience, not secrets.
 
-It is matched **case-insensitively** at both enforcement points — `grep -iE` in
-the work job and `new RegExp(…, 'i')` in the verdict script — so keep repo
-patterns lowercase. `audit` already catches `AdminAudit.tsx`, and writing
-`[Aa]udit` only makes the pattern look like it has to.
+Both are matched **case-insensitively** at both enforcement points (`grep -iE` in
+the work job and `new RegExp(…, 'i')` in the verdict script), so keep repo
+patterns lowercase, and ERE-only.
 
 ## What Claude can reach
 

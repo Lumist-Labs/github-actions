@@ -19,8 +19,10 @@ name: Claude Issue Autopilot (shared)
 #
 # GUARDRAILS ARE LAYERS. The scoring prompt refuses invariant-touching work,
 # scripts/autopilot-verdict.js independently re-checks the returned `files[]`
-# against `blocked-paths` and overrules the model, and the work job checks the
-# diff that actually happened. A prompt is not a security boundary.
+# against `blocked-paths` and `sensitive-paths` and overrules the model, and the
+# work job checks the diff that actually happened. Blocked paths are never
+# pushed; sensitive ones only on an admin's Start anyway or a fix run, with the
+# PR labelled autopilot-sensitive. A prompt is not a security boundary.
 #
 # TOKENS
 # ------
@@ -131,6 +133,16 @@ on:
         required: false
         type: string
         default: '(^alembic/)|(^\.github/)|(^docker-compose)|(^Dockerfile)|(auth)|(scope)|(policy)|(vault)|(approval)|(audit)|(secret)|(credential)|(permission)|(security)|(migration)'
+      sensitive-paths:
+        description: >-
+          Extended-regex, case-insensitive, for code a person decides on: auth,
+          permissions, audit, a core runtime. A hit sends the issue to a
+          developer, like an over-size score, but an admin's Start anyway can
+          build it. The PR is labelled autopilot-sensitive and lists the files.
+          Blocked paths win where both match. Empty means none.
+        required: false
+        type: string
+        default: ''
       branch-prefixes:
         description: >-
           Pipe-separated branch type prefixes the scorer may pick. A prefix
@@ -503,6 +515,7 @@ jobs:
           MAX_POINTS: ${{ inputs.max-points }}
           OFFER_MAX_POINTS: ${{ inputs.offer-max-points }}
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
+          SENSITIVE_PATHS: ${{ inputs.sensitive-paths }}
           BRANCH_PREFIXES: ${{ inputs.branch-prefixes }}
           OVERRIDE: ${{ inputs.mode == 'override' }}
           ISSUE: ${{ inputs.issue }}
@@ -697,6 +710,8 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           MODE: ${{ inputs.mode }}
           SETUP: ${{ inputs.setup }}
+          BLOCKED_PATHS: ${{ inputs.blocked-paths }}
+          SENSITIVE_PATHS: ${{ inputs.sensitive-paths }}
         run: |
           set -euo pipefail
           gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
@@ -755,6 +770,14 @@ jobs:
             fi
             echo ""
             echo "The repository is checked out at $(pwd) on branch $(git rev-parse --abbrev-ref HEAD)."
+            echo "Protected paths, never touched in any run (extended regex, case-insensitive): $BLOCKED_PATHS"
+            if [ -n "$SENSITIVE_PATHS" ]; then
+              if [ "$MODE" = auto ]; then
+                echo "Sensitive paths, not touched in this run: $SENSITIVE_PATHS"
+              else
+                echo "Sensitive paths, which this run may touch where the fix needs them: $SENSITIVE_PATHS"
+              fi
+            fi
             echo "Read CLAUDE.md, write the failing test first, then make it pass."
             if [ -n "$SETUP" ]; then
               echo "The project's test tooling is installed ($SETUP), with a Postgres if it uses one."
@@ -857,6 +880,8 @@ jobs:
       - name: Re-check the real diff against blocked paths
         env:
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
+          SENSITIVE_PATHS: ${{ inputs.sensitive-paths }}
+          MODE: ${{ inputs.mode }}
           BRANCH: ${{ inputs.mode == 'fix' && inputs.branch || needs.score.outputs.branch }}
           BASE_SHA: ${{ steps.prep.outputs.base }}
         run: |
@@ -875,8 +900,32 @@ jobs:
             echo "::error::Claude made no change: ${why:-it gave no explanation}" | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
-          if grep -iE "$BLOCKED_PATHS" /tmp/changed.txt; then
+          # grep exits 1 for no match and 2 for a pattern it can't compile. The
+          # verdict script compiled the same pattern as a JS RegExp, so one valid
+          # there and not here must stop the push, not read as "no match".
+          matches() {
+            local rc=0
+            grep -iE "$2" /tmp/changed.txt > "$3" || rc=$?
+            if [ "$rc" -gt 1 ]; then
+              echo "::error::$1 is not a valid extended regex for grep: $2. Refusing to push." | tee -a /tmp/autopilot-failure.txt
+              exit 1
+            fi
+          }
+          matches blocked-paths "$BLOCKED_PATHS" /tmp/blocked.txt
+          if [ -s /tmp/blocked.txt ]; then
+            cat /tmp/blocked.txt
             echo "::error::The implementation touched a blocked path (listed above). Refusing to push." | tee -a /tmp/autopilot-failure.txt
+            exit 1
+          fi
+          # An automatic run was never authorized for these; an admin's Start
+          # anyway was, and a fix run is on a PR a person already has to review.
+          : > /tmp/sensitive.txt
+          if [ -n "$SENSITIVE_PATHS" ]; then
+            matches sensitive-paths "$SENSITIVE_PATHS" /tmp/sensitive.txt
+          fi
+          if [ -s /tmp/sensitive.txt ] && [ "$MODE" = auto ]; then
+            cat /tmp/sensitive.txt
+            echo "::error::An automatic run touched a sensitive path (listed above). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
 
@@ -932,10 +981,19 @@ jobs:
             {
               echo "Autopilot pushed a fix for the failing checks: ${RUN_URL}"
               echo ""
+              if [ -s /tmp/sensitive.txt ]; then
+                echo "**The fix touches sensitive paths.** Read these first:"
+                sed 's/.*/- `&`/' /tmp/sensitive.txt
+                echo ""
+              fi
               cat /tmp/pr-body.md
             } > /tmp/fix-comment.md
             # The fix is already pushed; a failed comment must not report the run as failed.
             gh pr comment "$PR" -R "$REPO" --body-file /tmp/fix-comment.md || echo "::warning::could not comment on PR $PR"
+            if [ -s /tmp/sensitive.txt ]; then
+              gh pr edit "$PR" -R "$REPO" --add-label autopilot-sensitive \
+                || echo "::warning::could not label $REPO#$PR autopilot-sensitive; the fix touched: $(tr '\n' ' ' < /tmp/sensitive.txt)"
+            fi
             exit 0
           fi
 
@@ -957,6 +1015,12 @@ jobs:
             # greps the PR body, not the commit.
             echo "Closes #${ISSUE}"
             echo ""
+            if [ -s /tmp/sensitive.txt ]; then
+              echo "> [!WARNING]"
+              echo "> **Touches sensitive paths.** A Beacon admin approved this. Read these first:"
+              sed 's/.*/> - `&`/' /tmp/sensitive.txt
+              echo ""
+            fi
             cat /tmp/pr-body.md
           } > /tmp/pr-final.md
 
@@ -967,6 +1031,11 @@ jobs:
             --title "${TYPE}: #${ISSUE} ${TITLE}" \
             --body-file /tmp/pr-final.md)
           gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot opened a draft pull request: ${URL}"
+          # The body already lists the files, so a missing label loses the filter, not the warning.
+          if [ -s /tmp/sensitive.txt ]; then
+            gh pr edit "$URL" --add-label autopilot-sensitive \
+              || echo "::warning::could not label $URL autopilot-sensitive; is the label missing in $REPO?"
+          fi
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label autopiloted || true
 
       # Its own token, because a failure before the write token was minted

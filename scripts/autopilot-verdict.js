@@ -22,8 +22,12 @@
 // OVERRIDE=true is a Beacon admin's trigger. It waives size, confidence and the
 // model's own `review`, never a stop that makes the change unsafe.
 //
-// Reads from env: MAX_POINTS, OFFER_MAX_POINTS, BLOCKED_PATHS, BRANCH_PREFIXES,
-// OVERRIDE, ISSUE, GITHUB_OUTPUT.
+// Blocked paths are never built. Sensitive paths are judged: a person decides,
+// and an admin's Start anyway can build them. See
+// docs/features/autopilot-path-tiers/PLAN.md.
+//
+// Reads from env: MAX_POINTS, OFFER_MAX_POINTS, BLOCKED_PATHS, SENSITIVE_PATHS,
+// BRANCH_PREFIXES, OVERRIDE, ISSUE, GITHUB_OUTPUT.
 
 const fs = require('fs');
 
@@ -31,6 +35,8 @@ const [rawPath, verdictPath, commentPath] = process.argv.slice(2);
 const maxPoints = Number(process.env.MAX_POINTS || 2);
 const offerMaxPoints = Number(process.env.OFFER_MAX_POINTS || 3);
 const blocked = new RegExp(process.env.BLOCKED_PATHS || '(^alembic/)', 'i');
+// Unset means none: new RegExp('') would match every path.
+const sensitive = process.env.SENSITIVE_PATHS ? new RegExp(process.env.SENSITIVE_PATHS, 'i') : null;
 const prefixes = (process.env.BRANCH_PREFIXES || 'feat|fix').split('|');
 const issue = process.env.ISSUE || '0';
 const override = process.env.OVERRIDE === 'true';
@@ -113,6 +119,10 @@ const hits = files.filter((f) => blocked.test(f));
 if (hits.length) {
   unsafe.push(`touches protected paths — ${hits.join(', ')}`);
 }
+const sensitiveHits = sensitive ? files.filter((f) => !blocked.test(f) && sensitive.test(f)) : [];
+if (sensitiveHits.length) {
+  judged.push(`touches sensitive paths — ${sensitiveHits.join(', ')}`);
+}
 
 // Judged, not unsafe: an admin's Start anyway must be able to build an issue
 // the scorer wouldn't scope. The work job re-checks the real diff against the
@@ -151,7 +161,7 @@ const waived = override && !unsafe.length ? [...judged, ...soft] : [];
 
 fs.writeFileSync(
   verdictPath,
-  JSON.stringify({ decision, override, points, confidence, branch, files, acceptance, reason, objections, waived }, null, 2)
+  JSON.stringify({ decision, override, points, confidence, branch, files, acceptance, reason, objections, waived, sensitive: sensitiveHits }, null, 2)
 );
 
 const DECISION_TEXT = {
