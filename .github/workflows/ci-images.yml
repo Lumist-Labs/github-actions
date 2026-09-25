@@ -120,7 +120,8 @@ jobs:
       - name: Compute tags
         id: tags
         run: |
-          ref="${REGISTRY}/${{ matrix.image }}"
+          # Lowercased: image names must be, and the org is "Lumist-Labs".
+          ref="${REGISTRY,,}/${{ matrix.image }}"
           stamp="$(date -u +%Y%m%d)-$(git rev-parse --short=7 HEAD)"
           {
             echo "moving=${ref}:${{ matrix.tag }}"
