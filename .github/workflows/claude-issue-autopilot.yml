@@ -819,7 +819,10 @@ jobs:
           git diff --cached --name-only --no-renames "$BASE_SHA" > /tmp/changed.txt
           echo "::group::Changed files"; cat /tmp/changed.txt; echo "::endgroup::"
           if [ ! -s /tmp/changed.txt ]; then
-            echo "::error::Claude changed nothing. There is no pull request to open." | tee -a /tmp/autopilot-failure.txt
+            # Its PR body says why (already fixed, not a code change, needs a
+            # decision); that is the reason a person needs, not "changed nothing".
+            why=$(grep -v '^[[:space:]]*$' /tmp/pr-body.md 2>/dev/null | grep -v '^#' | head -n 3 | tr '\n' ' ' | cut -c1-400) || true
+            echo "::error::Claude made no change: ${why:-it gave no explanation}" | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
           if grep -iE "$BLOCKED_PATHS" /tmp/changed.txt; then
