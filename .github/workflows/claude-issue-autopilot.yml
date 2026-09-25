@@ -777,7 +777,7 @@ jobs:
             found = (Array.isArray(found) ? found : [])
               .filter((f) => f && typeof f.title === "string" && f.title.trim())
               .slice(0, 3)
-              .map((f) => ({ title: f.title.slice(0, 200), detail: String(f.detail || "").slice(0, 2000) }));
+              .map((f) => ({ title: f.title.replace(/\s+/g, " ").trim().slice(0, 200), detail: String(f.detail || "").slice(0, 2000) }));
             fs.writeFileSync("/tmp/pr-body.md", body.replace(/<findings>[\s\S]*?<\/findings>/, "").trimEnd() + "\n");
             fs.writeFileSync("/tmp/findings.json", JSON.stringify(found));
             console.log(`findings: ${found.length}`);
