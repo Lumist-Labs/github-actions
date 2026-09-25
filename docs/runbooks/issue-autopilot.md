@@ -90,6 +90,12 @@ because the first two are both statements of intent and only the third is a fact
 A pattern `grep -E` can't compile stops the push too, since JS accepts syntax
 (lookarounds) that ERE doesn't.
 
+`sensitive-diff` covers what no path can: an Ash `policies` block inside an
+ordinary resource, a pgvector `ORDER BY`. It is matched against the lines the
+real diff changes plus three lines of context, and a hit makes that file
+sensitive. It only exists at the diff layer, since the scorer's file list says
+nothing about which lines will change.
+
 The two lists do different jobs. `blocked-paths` is what a bot never writes:
 CI, container and deploy config, lockfiles, migrations, secret stores.
 `sensitive-paths` is what a person decides on: auth, tenancy, policy, audit,
@@ -118,17 +124,15 @@ What remains in reach during `work` is `ANTHROPIC_API_KEY` and the runner host
 itself (`bypassPermissions` includes Bash). Running `work` in a container is the
 fix for the second.
 
-## Why the work job runs no tests
+## What the work job tests
 
-It has no toolchain and does not try to get one. `actions/setup-python` 404s on
-the self-hosted host (see [`runners-and-ci.md`](runners-and-ci.md)), so a
-toolchain step here is a reliable way to fail runs for reasons unrelated to the
-change. The target repo's CI is the real gate and it fires on the PR.
+With a `setup` command, the job runs in the repo's `container-image`, installs
+what the tests need, starts Postgres when `postgres-image` is set, and exports
+`test-env`. Claude runs the tests it wrote, the existing tests for the files it
+changed, and lint, not the whole suite. The target repo's CI runs the full suite
+on the PR and is still the real gate.
 
-The cost is honest and stated in the PR body: nothing was verified before the
-push. If you want pre-push gates, containerize the `work` job in
-`ghcr.io/lumist-labs/ci-python-uv:3.12` the way lumios's `ci.yml` does —
-that is the intended upgrade, not a rewrite.
+Without `setup`, nothing runs before the push, and the PR body says so.
 
 ## Re-running, and not running twice
 
