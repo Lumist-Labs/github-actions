@@ -34,5 +34,17 @@
     "image": "ci-rust-tauri",
     "tag": "1.97",
     "consumers": "areteos (desktop-ci.yml)"
+  },
+  {
+    "dir": "autopilot-python-3.12",
+    "image": "ci-autopilot-python",
+    "tag": "3.12",
+    "consumers": "Autopilot work job (lumios, bd-pulse)"
+  },
+  {
+    "dir": "autopilot-elixir-1.19.5-otp-28",
+    "image": "ci-autopilot-elixir",
+    "tag": "1.19.5-otp-28",
+    "consumers": "Autopilot work job (lumilearn, vector)"
   }
 ]
