@@ -678,7 +678,13 @@ jobs:
             > /tmp/pr-body.md \
             2> /tmp/work-stderr.log; then
             echo "::group::Claude stderr"; cat /tmp/work-stderr.log || true; echo "::endgroup::"
-            reason=$(grep -v '^[[:space:]]*$' /tmp/work-stderr.log | tail -n 1 | cut -c1-300)
+            # `|| true`: an empty log makes grep fail, and -e would exit before the error is recorded.
+            reason=$(grep -v '^[[:space:]]*$' /tmp/work-stderr.log | tail -n 1 | cut -c1-300) || true
+            # This line goes into an issue comment, where Actions' log masking doesn't reach.
+            for secret in "${ANTHROPIC_API_KEY:-}" "${LLM_GATEWAY_KEY:-}"; do
+              [ -n "$secret" ] && reason=${reason//"$secret"/[redacted]}
+            done
+            reason=$(printf '%s' "$reason" | sed -E 's/(sk-[A-Za-z0-9_-]{8})[A-Za-z0-9_-]+/\1[redacted]/g; s/(Bearer )[^ ]+/\1[redacted]/g')
             echo "::error::Claude implementation pass failed: ${reason:-no output}" | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
