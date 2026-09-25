@@ -55,15 +55,16 @@ test('JSON wrapped in prose still parses', () => {
   assert.equal(decision(`Here you go:\n${JSON.stringify(GOOD)}\nDone.`), 'work');
 });
 
-test('one size step over, or medium confidence, is an offer', () => {
+test('one size step over, or medium or low confidence, is an offer', () => {
   assert.equal(decision({ ...GOOD, points: 3 }), 'offer');
   assert.equal(decision({ ...GOOD, confidence: 'medium' }), 'offer');
   assert.equal(decision({ ...GOOD, points: 3, confidence: 'medium' }), 'offer');
+  assert.equal(decision({ ...GOOD, confidence: 'low' }), 'offer');
+  assert.equal(decision({ ...GOOD, points: 3, confidence: 'low' }), 'offer');
 });
 
-test('too big or low confidence is review', () => {
+test('too big is review', () => {
   assert.equal(decision({ ...GOOD, points: 5 }), 'review');
-  assert.equal(decision({ ...GOOD, confidence: 'low' }), 'review');
 });
 
 test('missing or unknown confidence fails closed', () => {
