@@ -101,11 +101,14 @@ if (hits.length) {
   unsafe.push(`touches protected paths — ${hits.join(', ')}`);
 }
 
+// Judged, not unsafe: an admin's Start anyway must be able to build an issue
+// the scorer wouldn't scope. The work job re-checks the real diff against the
+// protected paths before anything is pushed, so that guard still holds.
 if (!files.length) {
-  unsafe.push('the scoring pass named no files, so nothing was actually authorized');
+  judged.push('the scoring pass named no files');
 }
 if (!acceptance.length) {
-  unsafe.push('no acceptance criteria, so there is no definition of done to implement against');
+  judged.push('no acceptance criteria');
 }
 
 // A branch prefix outside the consumer's CI filter produces a PR with no checks
