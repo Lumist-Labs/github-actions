@@ -865,7 +865,8 @@ jobs:
               echo ""
               cat /tmp/pr-body.md
             } > /tmp/fix-comment.md
-            gh pr comment "$PR" -R "$REPO" --body-file /tmp/fix-comment.md
+            # The fix is already pushed; a failed comment must not report the run as failed.
+            gh pr comment "$PR" -R "$REPO" --body-file /tmp/fix-comment.md || echo "::warning::could not comment on PR $PR"
             exit 0
           fi
 
