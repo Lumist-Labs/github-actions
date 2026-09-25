@@ -765,6 +765,23 @@ jobs:
             exit 1
           fi
           echo "::group::Claude stderr"; cat /tmp/work-stderr.log || true; echo "::endgroup::"
+          # Findings leave the PR body; the commit step posts them for Beacon to file.
+          node -e '
+            const fs = require("fs");
+            const body = fs.readFileSync("/tmp/pr-body.md", "utf8");
+            const m = body.match(/<findings>([\s\S]*?)<\/findings>/);
+            let found = [];
+            if (m) {
+              try { found = JSON.parse(m[1]); } catch (e) { console.log("::warning::findings block was not valid JSON: " + e.message); }
+            }
+            found = (Array.isArray(found) ? found : [])
+              .filter((f) => f && typeof f.title === "string" && f.title.trim())
+              .slice(0, 3)
+              .map((f) => ({ title: f.title.replace(/\s+/g, " ").trim().slice(0, 200), detail: String(f.detail || "").slice(0, 2000) }));
+            fs.writeFileSync("/tmp/pr-body.md", body.replace(/<findings>[\s\S]*?<\/findings>/, "").trimEnd() + "\n");
+            fs.writeFileSync("/tmp/findings.json", JSON.stringify(found));
+            console.log(`findings: ${found.length}`);
+          '
           echo "::group::PR body"; cat /tmp/pr-body.md; echo "::endgroup::"
 
       # The only check that is a fact rather than intent. Diffed against the
@@ -885,6 +902,33 @@ jobs:
 
       # Its own token, because a failure before the write token was minted
       # would otherwise leave the issue sitting there looking queued.
+      # Beacon files each as a report on this issue's app when the run ends.
+      - name: Post what Autopilot found along the way
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          ISSUE: ${{ inputs.issue }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [ -s /tmp/findings.json ] || exit 0
+          COUNT=$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/findings.json","utf8")).length)')
+          [ "$COUNT" -gt 0 ] || exit 0
+          marker=$(RUN_URL="$RUN_URL" node -e '
+            const fs = require("fs");
+            const findings = JSON.parse(fs.readFileSync("/tmp/findings.json", "utf8"));
+            process.stdout.write(JSON.stringify({ run: process.env.RUN_URL, findings }).replace(/--/g, "\\u002d\\u002d"));
+          ')
+          list=$(node -e '
+            const f = JSON.parse(require("fs").readFileSync("/tmp/findings.json", "utf8"));
+            console.log(f.map((x) => "- " + x.title.replace(/<!--/g, "&lt;!--")).join("\n"));
+          ')
+          gh issue comment "$ISSUE" -R "$REPO" --body "<!-- autopilot-findings ${marker} -->
+          Autopilot noticed ${COUNT} other bug(s) while working on this. Beacon files each as its own report.
+
+          ${list}" || echo "::warning::could not post findings"
+
       - name: Mint a token for the failure handback
         id: rescue
         if: failure() && env.USE_TARGET_TOKEN != 'true'
