@@ -149,7 +149,8 @@ on:
           diff adds or removes and the three around each change, for invariants
           no path can find: Ash `policies`
           blocks inside ordinary resources, a pgvector ORDER BY. A file whose
-          changed lines match is treated as a sensitive path. Empty means none.
+          changed lines match is treated as a sensitive path. Binary files have
+          no lines, so only sensitive-paths covers them. Empty means none.
         required: false
         type: string
         default: ''
@@ -985,6 +986,7 @@ jobs:
           BASE: ${{ inputs.base-branch }}
           BASE_SHA: ${{ steps.prep.outputs.base }}
           PR: ${{ inputs.pr }}
+          SETUP: ${{ inputs.setup }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -1038,9 +1040,15 @@ jobs:
           {
             echo "> Opened automatically by [Autopilot](${RUN_URL}) because ${WHY}."
             echo ">"
-            echo "> **Draft on purpose.** No tests or lint ran before this push — the checks"
-            echo "> on this pull request are the first verification it has had. Review it as"
-            echo "> you would any other PR, and then some."
+            if [ -n "$SETUP" ]; then
+              echo "> **Draft on purpose.** Claude ran the tests it wrote and those for the files"
+              echo "> it changed, not the whole suite; CI on this pull request runs that. Review it"
+              echo "> as you would any other PR, and then some."
+            else
+              echo "> **Draft on purpose.** No tests or lint ran before this push — the checks"
+              echo "> on this pull request are the first verification it has had. Review it as"
+              echo "> you would any other PR, and then some."
+            fi
             echo ""
             # In the body, outside the blockquote, because close-issues-on-develop
             # greps the PR body, not the commit.
