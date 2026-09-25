@@ -117,12 +117,12 @@ test('an admin trigger waives size, confidence and the model saying review', () 
   assert.equal(overridden({ ...GOOD, confidence: 'low' }), 'work');
   assert.equal(overridden({ ...GOOD, confidence: 'medium', points: 3 }), 'work');
   assert.equal(overridden({ ...GOOD, decision: 'review', reason: 'too big' }), 'work');
+  // The scorer declining to scope it is its judgment too; the diff check still guards.
+  assert.equal(overridden({ ...GOOD, decision: 'review', files: [], acceptance: [] }), 'work');
 });
 
 test('an admin trigger never waives an unsafe stop', () => {
   assert.equal(overridden({ ...GOOD, files: ['src/auth/session.py'] }), 'review');
-  assert.equal(overridden({ ...GOOD, files: [] }), 'review');
-  assert.equal(overridden({ ...GOOD, acceptance: [] }), 'review');
   assert.equal(overridden({ ...GOOD, blocked_reason: 'touches the vault' }), 'review');
   assert.equal(overridden({ ...GOOD, branch: 'docs/7-x' }), 'review');
   assert.equal(overridden({ ...GOOD, branch: 'fix/8-x' }), 'review');
