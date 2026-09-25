@@ -815,9 +815,10 @@ jobs:
         run: |
           # The last recorded reason, if a step recorded one; otherwise the step
           # died on its own (a network or runner fault) and the run log is all there is.
+          # A null reason in the marker tells Beacon to ask the jobs API which step died.
           reason=$(sed 's/^::error:://' /tmp/autopilot-failure.txt 2>/dev/null | tail -n 1)
+          marker=$(REASON="$reason" RUN_URL="$RUN_URL" node -e 'process.stdout.write(JSON.stringify({reason: process.env.REASON || null, run: process.env.RUN_URL}).replace(/--/g, "\\u002d\\u002d"))')
           reason=${reason:-no step recorded a reason; see the run log}
-          marker=$(REASON="$reason" RUN_URL="$RUN_URL" node -e 'process.stdout.write(JSON.stringify({reason: process.env.REASON, run: process.env.RUN_URL}).replace(/--/g, "\\u002d\\u002d"))')
           gh issue comment "$ISSUE" -R "$REPO" --body "<!-- autopilot-failure ${marker} -->
           Autopilot scored this issue as workable, but the implementation run failed: ${RUN_URL}
 
