@@ -71,6 +71,10 @@ const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : '';
 const blockedReason = typeof parsed.blocked_reason === 'string' ? parsed.blocked_reason.trim() : '';
 // Missing or unrecognised reads as low, so a model that drops the field fails closed.
 const confidence = ['high', 'medium', 'low'].includes(parsed.confidence) ? parsed.confidence : 'low';
+const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
+  .filter((q) => typeof q === 'string' && q.trim())
+  .map((q) => q.replace(/\s+/g, ' ').trim().slice(0, 200))
+  .slice(0, 3);
 
 // Collected rather than returned early, so the comment can list every one that
 // fired. `unsafe` is always review. `judged` is review unless an admin
@@ -135,7 +139,10 @@ if (!branch.includes('/') || !prefixes.includes(prefix)) {
 }
 
 let decision;
-if (unsafe.length) decision = 'review';
+// Already fixed skips the build gates: nothing gets built, a person confirms it.
+// An admin's override still means "build it", and unusable output still stops.
+if (parsed.decision === 'already_fixed' && !parseError && !override) decision = 'already_fixed';
+else if (unsafe.length) decision = 'review';
 else if (override) decision = 'work';
 else if (judged.length) decision = 'review';
 else decision = soft.length ? 'offer' : 'work';
@@ -151,6 +158,7 @@ const DECISION_TEXT = {
   work: 'implement it — a draft PR is on the way',
   offer: 'offered — waiting for a Beacon admin to start it',
   review: 'developer review',
+  already_fixed: 'looks already fixed — a person confirms and closes it',
 };
 
 // Model-written text goes into the visible comment too, where a stray `<!--`
@@ -161,7 +169,7 @@ const md = [];
 // Hidden marker carrying the score as JSON. The work job finds its brief by
 // the marker, and Beacon stores the score from it. `--` is escaped so nothing
 // in a reason can close the HTML comment early.
-const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived })
+const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived, questions })
   .replace(/--/g, '-\\u002d');
 md.push(`<!-- autopilot-verdict ${scoreData} -->`);
 md.push('### Autopilot score');
@@ -188,6 +196,12 @@ if (acceptance.length) {
   md.push('**Done when:**');
   md.push('');
   acceptance.forEach((a) => md.push(`- ${a}`));
+  md.push('');
+}
+if (questions.length) {
+  md.push('**Questions for the reporter:**');
+  md.push('');
+  questions.forEach((q) => md.push(`- ${visible(q)}`));
   md.push('');
 }
 if (decision === 'review') {
