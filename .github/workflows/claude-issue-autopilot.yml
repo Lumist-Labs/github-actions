@@ -127,10 +127,10 @@ on:
         type: string
         default: ''
       claude-model:
-        description: 'Model for the scoring pass. It runs on every new report, read-only, and blocked paths, CI and review all backstop it.'
+        description: 'Model for the scoring pass. Sonnet named no files on any report it scored (2026-09-25), so nothing could ever qualify as automatic.'
         required: false
         type: string
-        default: claude-sonnet-5
+        default: claude-opus-5-5
       implement-model:
         description: 'Model for the implementation pass: the long, hard part, and it runs only on reports that pass the score.'
         required: false
