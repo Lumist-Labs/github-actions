@@ -87,10 +87,12 @@ if (!parseError && !validPoints) {
 } else if (points > maxPoints) {
   soft.push(`scored ${points} points, above the ${maxPoints}-point autopilot threshold`);
 }
-if (confidence === 'low') {
-  judged.push('the scoring pass reported low confidence');
-} else if (confidence === 'medium') {
-  soft.push('the scoring pass reported medium confidence');
+// Low confidence is an offer, not a hand-off: an admin can see the reasons and
+// approve in one click. A missing or unknown value still fails closed.
+if (!['high', 'medium', 'low'].includes(parsed.confidence)) {
+  judged.push('the scoring pass gave no usable confidence');
+} else if (confidence !== 'high') {
+  soft.push(`the scoring pass reported ${confidence} confidence`);
 }
 if (blockedReason) {
   unsafe.push(`flagged as permanently unsuitable: ${blockedReason}`);
