@@ -819,6 +819,19 @@ jobs:
           if ! bash -c "$SETUP"; then
             echo "::warning::setup failed: $SETUP. Claude will run without the project's test tooling."
           fi
+          # Setup can rewrite a lockfile (mix deps.get) or leave build output
+          # the repo doesn't ignore. Neither is Claude's change, and a blocked
+          # lockfile in the diff would refuse every push. Untracked output is
+          # excluded now. Tracked files are snapshotted, and restored before the
+          # push only if Claude left them as setup did.
+          git ls-files --others --exclude-standard >> .git/info/exclude
+          : > /tmp/setup-dirty.txt
+          git diff --name-only -z | while IFS= read -r -d '' f; do
+            printf '%s\t%s\n' "$(git hash-object -- "$f")" "$f" >> /tmp/setup-dirty.txt
+          done
+          if [ -s /tmp/setup-dirty.txt ]; then
+            echo "::warning::setup changed tracked files; they are kept out of the PR unless Claude edits them: $(cut -f2 /tmp/setup-dirty.txt | tr '\n' ' ')"
+          fi
 
       # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass
@@ -889,6 +902,13 @@ jobs:
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
             echo "::error::Claude left $BRANCH (now on $(git rev-parse --abbrev-ref HEAD)). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
+          fi
+          if [ -s /tmp/setup-dirty.txt ]; then
+            while IFS=$'\t' read -r hash f; do
+              if [ -e "$f" ] && [ "$(git hash-object -- "$f")" = "$hash" ]; then
+                git checkout "$BASE_SHA" -- "$f"
+              fi
+            done < /tmp/setup-dirty.txt
           fi
           git add -A
           git diff --cached --name-only --no-renames "$BASE_SHA" > /tmp/changed.txt
