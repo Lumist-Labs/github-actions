@@ -160,6 +160,14 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      setup:
+        description: >-
+          Shell command run in the target repo before the implementation pass,
+          to install what its tests need (e.g. `cd frontend && npm ci`). Runs
+          with no GitHub token in reach. Empty means Claude can't run tests.
+        required: false
+        type: string
+        default: ''
       container-image:
         description: 'Image both jobs run in. Needs node 22, git and bash.'
         required: false
@@ -623,6 +631,8 @@ jobs:
           GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.reader.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
+          MODE: ${{ inputs.mode }}
+          SETUP: ${{ inputs.setup }}
         run: |
           set -euo pipefail
           gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
@@ -640,9 +650,15 @@ jobs:
             echo "Body:"
             cat /tmp/issue-body.txt
             echo ""
-            echo "The gate that authorized this run scored it as follows. The file list is"
-            echo "your budget — do not touch anything outside it — and the acceptance"
-            echo "criteria are your definition of done."
+            if [ "$MODE" = override ]; then
+              echo "A Beacon admin started this run (Start anyway): build it. If the score"
+              echo "below names files and criteria, use them. If it doesn't, choose the"
+              echo "smallest set of files yourself and state your own definition of done."
+            else
+              echo "The gate that authorized this run scored it as follows. The file list is"
+              echo "your budget — do not touch anything outside it — and the acceptance"
+              echo "criteria are your definition of done."
+            fi
             echo ""
             cat /tmp/verdict-comment.md
             if [ -n "$EVIDENCE" ]; then
@@ -655,10 +671,26 @@ jobs:
             echo ""
             echo "The repository is checked out at $(pwd) on branch $(git rev-parse --abbrev-ref HEAD)."
             echo "Read CLAUDE.md, write the failing test first, then make it pass."
+            if [ -n "$SETUP" ]; then
+              echo "The project's test tooling is installed ($SETUP). Run the tests you write and"
+              echo "the suite around them, and fix failures before you finish. CI runs them next."
+            fi
             echo "Do not commit, push, or open a pull request — the workflow does that."
             echo "Your stdout becomes the pull request body."
           } > /tmp/work-prompt.txt
           echo "::group::Implementation prompt"; cat /tmp/work-prompt.txt; echo "::endgroup::"
+
+      # Before Claude, so it can run the tests it writes. No token exists yet:
+      # the write token is minted after the implementation pass.
+      - name: Install what the project's tests need
+        if: inputs.setup != ''
+        env:
+          SETUP: ${{ inputs.setup }}
+        run: |
+          set -euo pipefail
+          if ! bash -c "$SETUP"; then
+            echo "::warning::setup failed: $SETUP. Claude will run without the project's test tooling."
+          fi
 
       # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass

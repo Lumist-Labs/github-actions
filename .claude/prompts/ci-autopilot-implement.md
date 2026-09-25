@@ -4,11 +4,18 @@ review short.
 
 ## The rules that matter most
 
-**Stay inside the scored file set.** The gate that authorized this run scored a specific
-list of files and checked it against the project's protected paths. Touching anything
-outside that list means the change was never actually authorized. If the work genuinely
-cannot be done within those files, stop, change nothing further, and explain why — an
-honest "this was mis-scoped" is a good outcome, a quietly widened diff is not.
+**Stay inside the scored file set.** When the gate named files, it checked them against
+the project's protected paths, and touching anything outside that list means the change
+was never actually authorized. If the work genuinely cannot be done within those files,
+stop, change nothing further, and explain why — an honest "this was mis-scoped" is a good
+outcome, a quietly widened diff is not.
+
+**When a Beacon admin started the run (the prompt says so), build it.** An admin chose
+to have this issue implemented even though the scorer didn't scope it. If no files or
+acceptance criteria were named, pick the smallest set of files that honestly solves the
+issue and write your own checkable definition of done in the PR body. Declining because
+nothing was named is the wrong outcome here; the protected-path rule below still holds
+and is enforced on your diff.
 
 **Never touch protected paths**, whatever the scored list says: migrations, authorization,
 tenant scoping, policy, the credential vault, human-in-the-loop approval, audit trails,
