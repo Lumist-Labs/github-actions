@@ -127,15 +127,15 @@ on:
         type: string
         default: ''
       claude-model:
-        description: 'Model for the scoring pass. This is the decision, so bias to capability.'
-        required: false
-        type: string
-        default: claude-opus-5-5
-      implement-model:
-        description: 'Model for the implementation pass.'
+        description: 'Model for the scoring pass. It runs on every new report, read-only, and blocked paths, CI and review all backstop it.'
         required: false
         type: string
         default: claude-sonnet-5
+      implement-model:
+        description: 'Model for the implementation pass: the long, hard part, and it runs only on reports that pass the score.'
+        required: false
+        type: string
+        default: claude-opus-5-5
       max-turns:
         description: 'Turn cap on the implementation pass. The scoring pass is fixed at 20.'
         required: false
