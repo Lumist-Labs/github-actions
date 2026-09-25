@@ -482,6 +482,11 @@ jobs:
             gh issue edit "$ISSUE" -R "$REPO" --remove-label "$L" >/dev/null 2>&1 || true
           done
           gh issue edit "$ISSUE" -R "$REPO" --add-label "$ADD" || true
+          # The bot holds the issue while Autopilot builds it, so nobody picks it
+          # up by hand in parallel. LumistBot is a member of both orgs.
+          if [ "$DECISION" = work ]; then
+            gh issue edit "$ISSUE" -R "$REPO" --add-assignee LumistBot || echo "::warning::could not assign LumistBot"
+          fi
 
       # Otherwise a failed scoring pass leaves only an `eyes` reaction behind.
       - name: Hand back to a human on failure
@@ -825,7 +830,7 @@ jobs:
           **Why:** ${reason//<!--/&lt;!--}
 
           Any branch it pushed is left in place. Over to a developer." || true
-          gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label needs-human || true
+          gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label needs-human --remove-assignee LumistBot || true
 
       - name: Return the workspace to the runner user
         if: always()
