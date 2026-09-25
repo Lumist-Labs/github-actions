@@ -61,7 +61,12 @@ const validPoints = [1, 2, 3, 5, 8, 13].includes(parsed.points);
 const points = validPoints ? parsed.points : 99;
 const files = Array.isArray(parsed.files) ? parsed.files.filter((f) => typeof f === 'string') : [];
 const acceptance = Array.isArray(parsed.acceptance) ? parsed.acceptance.filter((a) => typeof a === 'string') : [];
-const branch = typeof parsed.branch === 'string' ? parsed.branch.trim() : '';
+// A scorer that wants a person often names no branch; an admin's Approve still
+// needs one, so a missing branch gets a safe default. A malformed one still stops.
+const branch =
+  typeof parsed.branch === 'string' && parsed.branch.trim()
+    ? parsed.branch.trim()
+    : `${prefixes.includes('fix') ? 'fix' : prefixes[0]}/${issue}-autopilot`;
 const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : '';
 const blockedReason = typeof parsed.blocked_reason === 'string' ? parsed.blocked_reason.trim() : '';
 // Missing or unrecognised reads as low, so a model that drops the field fails closed.
@@ -77,8 +82,10 @@ const soft = [];
 if (parseError) {
   unsafe.push(`the scoring pass did not return usable JSON (${parseError})`);
 }
+// Size decides the tier. The scorer wanting a person, or not naming files or a
+// definition of done, makes it an offer: an admin reads the reasons and decides.
 if (parsed.decision !== 'work' && !blockedReason) {
-  judged.push(reason || 'the scoring pass chose developer review');
+  soft.push(reason || 'the scoring pass chose developer review');
 }
 if (!parseError && !validPoints) {
   unsafe.push(`points ${JSON.stringify(parsed.points)} is not on the 1/2/3/5/8/13 scale`);
@@ -107,10 +114,10 @@ if (hits.length) {
 // the scorer wouldn't scope. The work job re-checks the real diff against the
 // protected paths before anything is pushed, so that guard still holds.
 if (!files.length) {
-  judged.push('the scoring pass named no files');
+  soft.push('the scoring pass named no files');
 }
 if (!acceptance.length) {
-  judged.push('no acceptance criteria');
+  soft.push('no acceptance criteria');
 }
 
 // A branch prefix outside the consumer's CI filter produces a PR with no checks
