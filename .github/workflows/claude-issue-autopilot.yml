@@ -623,6 +623,7 @@ jobs:
           GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.reader.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
@@ -640,9 +641,15 @@ jobs:
             echo "Body:"
             cat /tmp/issue-body.txt
             echo ""
-            echo "The gate that authorized this run scored it as follows. The file list is"
-            echo "your budget — do not touch anything outside it — and the acceptance"
-            echo "criteria are your definition of done."
+            if [ "$MODE" = override ]; then
+              echo "A Beacon admin started this run (Start anyway): build it. If the score"
+              echo "below names files and criteria, use them. If it doesn't, choose the"
+              echo "smallest set of files yourself and state your own definition of done."
+            else
+              echo "The gate that authorized this run scored it as follows. The file list is"
+              echo "your budget — do not touch anything outside it — and the acceptance"
+              echo "criteria are your definition of done."
+            fi
             echo ""
             cat /tmp/verdict-comment.md
             if [ -n "$EVIDENCE" ]; then
