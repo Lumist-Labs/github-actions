@@ -184,3 +184,25 @@ test('questions reach the score marker and the comment, capped at three', () => 
   assert.deepEqual(marker.questions, ['Which screen?', 'What was the exact error?', 'Every time?']);
   assert.match(comment, /Questions for the reporter/);
 });
+
+test('a sensitive path needs a person, and Start anyway can build it', () => {
+  const touching = { ...GOOD, files: ['src/db/crud_contacts.py', 'tests/test_contacts.py'] };
+  const env = { SENSITIVE_PATHS: '(^src/db/)' };
+  const scored = run(touching, env).verdict;
+  assert.equal(scored.decision, 'review');
+  assert.deepEqual(scored.sensitive, ['src/db/crud_contacts.py']);
+  const started = run(touching, { ...env, OVERRIDE: 'true' }).verdict;
+  assert.equal(started.decision, 'work');
+  assert.match(started.waived.join('\n'), /sensitive paths — src\/db\/crud_contacts\.py/);
+});
+
+test('a path both blocked and sensitive stays blocked on Start anyway', () => {
+  const touching = { ...GOOD, files: ['src/auth.py'] };
+  const v = run(touching, { SENSITIVE_PATHS: '(auth)', OVERRIDE: 'true' }).verdict;
+  assert.equal(v.decision, 'review');
+  assert.deepEqual(v.sensitive, []);
+});
+
+test('no sensitive paths configured matches nothing', () => {
+  assert.equal(run(GOOD, { SENSITIVE_PATHS: '' }).verdict.decision, 'work');
+});

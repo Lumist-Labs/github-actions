@@ -49,8 +49,8 @@ Field rules:
   CI branch filters, so a PR on one would silently get no checks. `{short-desc}` is
   lowercase kebab-case, at most five words.
 - `files` — every file you believe the change touches, including tests. Be complete and
-  be honest; the workflow independently re-checks this list against a blocked-path
-  pattern and will overrule you. Understating it does not get work through the gate, it
+  be honest; the workflow independently re-checks this list against the project's
+  blocked and sensitive path patterns and will overrule you. Understating it does not get work through the gate, it
   just makes your report wrong.
 - `acceptance` — what a reviewer would check to agree the issue is closed. If you cannot
   write these without guessing, the issue is underspecified: that is a `review`.
