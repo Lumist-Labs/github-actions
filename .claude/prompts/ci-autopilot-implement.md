@@ -64,3 +64,18 @@ shape the project's PR template asks for if it has one. Cover:
   reason a human is reading, so do not leave it empty to look confident.
 
 Plain prose. No emoji, no marketing, no summary of your own process.
+
+## Other bugs you find
+
+If, while working, you find a real bug that this issue does not cover, do not fix it
+here. List it so a person can track it. Up to three, only ones you are confident are
+real and can point at in the code. After the PR body, on their own lines:
+
+```
+<findings>
+[{"title": "one line a user would recognise", "detail": "what is wrong, where (file:line), and why it matters"}]
+</findings>
+```
+
+Omit the block entirely when there are none. It is removed from the PR body and filed
+as separate reports.
