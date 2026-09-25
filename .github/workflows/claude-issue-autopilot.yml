@@ -603,7 +603,7 @@ jobs:
           FORWARDED_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "$FORWARDED_KEY" ]; then
-            echo "::error::No ANTHROPIC_API_KEY available in the work job, though the score job had one. Check the Infisical OIDC identity still trusts this repo."
+            echo "::error::No ANTHROPIC_API_KEY available in the work job, though the score job had one. Check the Infisical OIDC identity still trusts this repo." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
 
@@ -661,6 +661,10 @@ jobs:
           ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.implement-model }}
           MAX_TURNS: ${{ inputs.max-turns }}
+          # The container runs as root, and Claude Code refuses bypassPermissions
+          # as root unless told it's sandboxed. It is: a throwaway container
+          # holding no GitHub token (the write token is minted after this step).
+          IS_SANDBOX: "1"
         run: |
           set -euo pipefail
           if ! claude \
@@ -674,7 +678,8 @@ jobs:
             > /tmp/pr-body.md \
             2> /tmp/work-stderr.log; then
             echo "::group::Claude stderr"; cat /tmp/work-stderr.log || true; echo "::endgroup::"
-            echo "::error::Claude implementation pass failed"
+            reason=$(grep -v '^[[:space:]]*$' /tmp/work-stderr.log | tail -n 1 | cut -c1-300)
+            echo "::error::Claude implementation pass failed: ${reason:-no output}" | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
           echo "::group::Claude stderr"; cat /tmp/work-stderr.log || true; echo "::endgroup::"
@@ -692,18 +697,18 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
-            echo "::error::Claude left $BRANCH (now on $(git rev-parse --abbrev-ref HEAD)). Refusing to push."
+            echo "::error::Claude left $BRANCH (now on $(git rev-parse --abbrev-ref HEAD)). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
           git add -A
           git diff --cached --name-only --no-renames "$BASE_SHA" > /tmp/changed.txt
           echo "::group::Changed files"; cat /tmp/changed.txt; echo "::endgroup::"
           if [ ! -s /tmp/changed.txt ]; then
-            echo "::error::Claude changed nothing. There is no pull request to open."
+            echo "::error::Claude changed nothing. There is no pull request to open." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
           if grep -iE "$BLOCKED_PATHS" /tmp/changed.txt; then
-            echo "::error::The implementation touched a blocked path (listed above). Refusing to push."
+            echo "::error::The implementation touched a blocked path (listed above). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
 
@@ -802,7 +807,17 @@ jobs:
           ISSUE: ${{ inputs.issue }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          gh issue comment "$ISSUE" -R "$REPO" --body "Autopilot scored this issue as workable, but the implementation run failed: ${RUN_URL}. Any branch it pushed is left in place. Over to a developer." || true
+          # The last recorded reason, if a step recorded one; otherwise the step
+          # died on its own (a network or runner fault) and the run log is all there is.
+          reason=$(sed 's/^::error:://' /tmp/autopilot-failure.txt 2>/dev/null | tail -n 1)
+          reason=${reason:-no step recorded a reason; see the run log}
+          marker=$(REASON="$reason" RUN_URL="$RUN_URL" node -e 'process.stdout.write(JSON.stringify({reason: process.env.REASON, run: process.env.RUN_URL}).replace(/--/g, "\\u002d\\u002d"))')
+          gh issue comment "$ISSUE" -R "$REPO" --body "<!-- autopilot-failure ${marker} -->
+          Autopilot scored this issue as workable, but the implementation run failed: ${RUN_URL}
+
+          **Why:** ${reason//<!--/&lt;!--}
+
+          Any branch it pushed is left in place. Over to a developer." || true
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-queued --add-label needs-human || true
 
       - name: Return the workspace to the runner user
