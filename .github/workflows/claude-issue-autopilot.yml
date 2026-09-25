@@ -826,8 +826,11 @@ jobs:
           # push only if Claude left them as setup did.
           git ls-files --others --exclude-standard >> .git/info/exclude
           : > /tmp/setup-dirty.txt
+          # A file setup deleted is recorded as `deleted`: hash-object would fail
+          # inside the substitution without tripping set -e.
           git diff --name-only -z | while IFS= read -r -d '' f; do
-            printf '%s\t%s\n' "$(git hash-object -- "$f")" "$f" >> /tmp/setup-dirty.txt
+            if [ -e "$f" ]; then hash=$(git hash-object -- "$f"); else hash=deleted; fi
+            printf '%s\t%s\n' "$hash" "$f" >> /tmp/setup-dirty.txt
           done
           if [ -s /tmp/setup-dirty.txt ]; then
             echo "::warning::setup changed tracked files; they are kept out of the PR unless Claude edits them: $(cut -f2 /tmp/setup-dirty.txt | tr '\n' ' ')"
@@ -905,8 +908,10 @@ jobs:
           fi
           if [ -s /tmp/setup-dirty.txt ]; then
             while IFS=$'\t' read -r hash f; do
-              if [ -e "$f" ] && [ "$(git hash-object -- "$f")" = "$hash" ]; then
+              if [ -e "$f" ]; then now=$(git hash-object -- "$f"); else now=deleted; fi
+              if [ "$now" = "$hash" ]; then
                 git checkout "$BASE_SHA" -- "$f"
+                echo "::warning::restored $f to the base: setup changed it and Claude didn't."
               fi
             done < /tmp/setup-dirty.txt
           fi
