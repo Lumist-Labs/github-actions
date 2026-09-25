@@ -55,6 +55,14 @@ test('JSON wrapped in prose still parses', () => {
   assert.equal(decision(`Here you go:\n${JSON.stringify(GOOD)}\nDone.`), 'work');
 });
 
+test('the scorer wanting a person, or scoping nothing, is an offer at offer size', () => {
+  const offerSized = { ...GOOD, points: 3 };
+  assert.equal(decision({ ...offerSized, files: [] }), 'offer');
+  assert.equal(decision({ ...offerSized, acceptance: [] }), 'offer');
+  assert.equal(decision({ ...offerSized, decision: 'review' }), 'offer');
+  assert.equal(decision({ ...GOOD, decision: 'review', files: [], acceptance: [], branch: undefined }), 'offer');
+});
+
 test('one size step over, or medium or low confidence, is an offer', () => {
   assert.equal(decision({ ...GOOD, points: 3 }), 'offer');
   assert.equal(decision({ ...GOOD, confidence: 'medium' }), 'offer');
@@ -76,9 +84,6 @@ test('missing or unknown confidence fails closed', () => {
 test('hard stops stay review even when size would only make it an offer', () => {
   const offerSized = { ...GOOD, points: 3 };
   assert.equal(decision({ ...offerSized, files: ['src/auth/session.py'] }), 'review');
-  assert.equal(decision({ ...offerSized, files: [] }), 'review');
-  assert.equal(decision({ ...offerSized, acceptance: [] }), 'review');
-  assert.equal(decision({ ...offerSized, decision: 'review' }), 'review');
   assert.equal(decision({ ...offerSized, blocked_reason: 'touches the vault' }), 'review');
   assert.equal(decision({ ...offerSized, branch: 'docs/7-x' }), 'review');
   assert.equal(decision({ ...offerSized, branch: 'fix/8-x' }), 'review');
