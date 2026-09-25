@@ -186,6 +186,25 @@ on:
         required: false
         type: string
         default: ''
+      postgres-image:
+        description: >-
+          Postgres for the implementation pass's tests (e.g. pgvector/pgvector:pg18),
+          reachable as host `postgres`, user and password `postgres`. Empty runs none.
+        required: false
+        type: string
+        default: ''
+      postgres-db:
+        description: 'Database the Postgres service creates.'
+        required: false
+        type: string
+        default: test
+      test-env:
+        description: >-
+          KEY=VALUE lines exported before setup and the implementation pass, such as
+          a test database URL or MIX_ENV=test. Configuration, not secrets.
+        required: false
+        type: string
+        default: ''
       container-image:
         description: 'Image both jobs run in. Needs node 22, git and bash.'
         required: false
@@ -552,6 +571,16 @@ jobs:
       USE_TARGET_TOKEN: ${{ secrets.TARGET_REPO_TOKEN != '' }}
     container:
       image: ${{ inputs.container-image }}
+    # An empty image skips the service, so repos without a database pay nothing.
+    services:
+      postgres:
+        image: ${{ inputs.postgres-image }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ${{ inputs.postgres-db }}
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
     defaults:
       run:
         shell: bash
@@ -727,13 +756,33 @@ jobs:
             echo "The repository is checked out at $(pwd) on branch $(git rev-parse --abbrev-ref HEAD)."
             echo "Read CLAUDE.md, write the failing test first, then make it pass."
             if [ -n "$SETUP" ]; then
-              echo "The project's test tooling is installed ($SETUP). Run the tests you write and"
-              echo "the suite around them, and fix failures before you finish. CI runs them next."
+              echo "The project's test tooling is installed ($SETUP), with a Postgres if it uses one."
+              echo "Run the tests you wrote, the existing tests for the files you changed, and the"
+              echo "lint and type checks, and fix what fails. Not the whole suite: CI runs that next."
             fi
             echo "Do not commit, push, or open a pull request — the workflow does that."
             echo "Your stdout becomes the pull request body."
           } > /tmp/work-prompt.txt
           echo "::group::Implementation prompt"; cat /tmp/work-prompt.txt; echo "::endgroup::"
+
+      # Config from Beacon's repo list, but still checked: a line that set PATH or a
+      # GITHUB_ variable would change what every later step runs.
+      - name: Export the test environment
+        if: inputs.test-env != ''
+        env:
+          TEST_ENV: ${{ inputs.test-env }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r line; do
+            [ -z "${line// }" ] && continue
+            key=${line%%=*}
+            if ! [[ "$key" =~ ^[A-Z][A-Z0-9_]*$ ]] || [[ "$key" =~ ^(GITHUB_|RUNNER_|ACTIONS_|ANTHROPIC_|INFISICAL_) ]] \
+              || [[ "$key" =~ ^(PATH|HOME|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|ENV|NODE_OPTIONS|GH_TOKEN|GITHUB_TOKEN)$ ]]; then
+              echo "::error::test-env may not set $key" | tee -a /tmp/autopilot-failure.txt
+              exit 1
+            fi
+            echo "$line" >> "$GITHUB_ENV"
+          done <<< "$TEST_ENV"
 
       # Before Claude, so it can run the tests it writes. No token exists yet:
       # the write token is minted after the implementation pass.
