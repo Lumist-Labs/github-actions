@@ -90,6 +90,12 @@ because the first two are both statements of intent and only the third is a fact
 A pattern `grep -E` can't compile stops the push too, since JS accepts syntax
 (lookarounds) that ERE doesn't.
 
+`sensitive-diff` covers what no path can: an Ash `policies` block inside an
+ordinary resource, a pgvector `ORDER BY`. It is matched against the lines the
+real diff changes plus three lines of context, and a hit makes that file
+sensitive. It only exists at the diff layer, since the scorer's file list says
+nothing about which lines will change.
+
 The two lists do different jobs. `blocked-paths` is what a bot never writes:
 CI, container and deploy config, lockfiles, migrations, secret stores.
 `sensitive-paths` is what a person decides on: auth, tenancy, policy, audit,

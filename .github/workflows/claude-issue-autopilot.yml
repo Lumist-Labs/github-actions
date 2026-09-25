@@ -143,6 +143,16 @@ on:
         required: false
         type: string
         default: ''
+      sensitive-diff:
+        description: >-
+          Extended-regex, case-insensitive, matched against the lines the real
+          diff adds or removes and the three around each change, for invariants
+          no path can find: Ash `policies`
+          blocks inside ordinary resources, a pgvector ORDER BY. A file whose
+          changed lines match is treated as a sensitive path. Empty means none.
+        required: false
+        type: string
+        default: ''
       branch-prefixes:
         description: >-
           Pipe-separated branch type prefixes the scorer may pick. A prefix
@@ -712,6 +722,7 @@ jobs:
           SETUP: ${{ inputs.setup }}
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
           SENSITIVE_PATHS: ${{ inputs.sensitive-paths }}
+          SENSITIVE_DIFF: ${{ inputs.sensitive-diff }}
         run: |
           set -euo pipefail
           gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
@@ -777,6 +788,9 @@ jobs:
               else
                 echo "Sensitive paths, which this run may touch where the fix needs them: $SENSITIVE_PATHS"
               fi
+            fi
+            if [ -n "$SENSITIVE_DIFF" ]; then
+              echo "Lines matching this are sensitive code wherever they live, under the same rule as sensitive paths: $SENSITIVE_DIFF"
             fi
             echo "Read CLAUDE.md, write the failing test first, then make it pass."
             if [ -n "$SETUP" ]; then
@@ -881,6 +895,7 @@ jobs:
         env:
           BLOCKED_PATHS: ${{ inputs.blocked-paths }}
           SENSITIVE_PATHS: ${{ inputs.sensitive-paths }}
+          SENSITIVE_DIFF: ${{ inputs.sensitive-diff }}
           MODE: ${{ inputs.mode }}
           BRANCH: ${{ inputs.mode == 'fix' && inputs.branch || needs.score.outputs.branch }}
           BASE_SHA: ${{ steps.prep.outputs.base }}
@@ -923,9 +938,25 @@ jobs:
           if [ -n "$SENSITIVE_PATHS" ]; then
             matches sensitive-paths "$SENSITIVE_PATHS" /tmp/sensitive.txt
           fi
+          if [ -n "$SENSITIVE_DIFF" ]; then
+            while IFS= read -r f; do
+              grep -qxF -- "$f" /tmp/sensitive.txt && continue
+              # Three lines of context, so an edit inside a policy block still
+              # hits when the line it changed names no Ash check itself.
+              git diff --cached -U3 --no-renames "$BASE_SHA" -- "$f" \
+                | grep -E '^[-+ ]' | grep -vE '^(\+\+\+|---) ' > /tmp/lines.txt || true
+              rc=0
+              grep -qiE "$SENSITIVE_DIFF" /tmp/lines.txt || rc=$?
+              if [ "$rc" -gt 1 ]; then
+                echo "::error::sensitive-diff is not a valid extended regex for grep: $SENSITIVE_DIFF. Refusing to push." | tee -a /tmp/autopilot-failure.txt
+                exit 1
+              fi
+              if [ "$rc" -eq 0 ]; then echo "$f" >> /tmp/sensitive.txt; fi
+            done < /tmp/changed.txt
+          fi
           if [ -s /tmp/sensitive.txt ] && [ "$MODE" = auto ]; then
             cat /tmp/sensitive.txt
-            echo "::error::An automatic run touched a sensitive path (listed above). Refusing to push." | tee -a /tmp/autopilot-failure.txt
+            echo "::error::An automatic run touched sensitive code (listed above). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
 
