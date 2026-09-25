@@ -14,16 +14,25 @@ trailing commentary. The workflow parses your entire stdout as JSON.
 {
   "points": 1|2|3|5|8|13,
   "confidence": "high" | "medium" | "low",
-  "decision": "work" | "review",
+  "decision": "work" | "review" | "already_fixed",
   "reason": "one or two sentences, plain English, addressed to a human reviewer",
   "branch": "{type}/{issue#}-{short-desc}",
   "files": ["path/relative/to/repo/root", "..."],
   "acceptance": ["a checkable statement of done", "..."],
-  "blocked_reason": "" | "why this can never be auto-worked"
+  "blocked_reason": "" | "why this can never be auto-worked",
+  "questions": ["a short question for the reporter", "..."]
 }
 ```
 
 Field rules:
+
+- `decision` — `already_fixed` when you read the code and what the reporter asks for
+  already exists or already works. Say exactly where in `reason` (file and behaviour),
+  so a person can confirm and close it in one click.
+- `questions` — up to three short questions for the **reporter**, only when an answer
+  would let you score this with confidence (which screen, the exact error text, the
+  steps). Plain words a non-engineer understands; no file names or jargon. Empty when
+  you have what you need. They are emailed to the reporter once.
 
 - `points` — Fibonacci, same scale the triage bot uses: **1** trivial single obvious
   change · **2** small, 1-2 files, straightforward · **3** a few files, some thinking ·

@@ -163,3 +163,24 @@ test('a reason quoting an HTML comment cannot hide the rest of the comment', () 
   assert.ok(!visibleText.includes('<!--'), 'no raw comment opener outside the marker');
   assert.match(visibleText, /needs a developer/);
 });
+
+test('already fixed is its own outcome, and never builds', () => {
+  assert.equal(decision({ ...GOOD, decision: 'already_fixed' }), 'already_fixed');
+  // Even over protected paths: nothing is built, a person confirms.
+  assert.equal(decision({ ...GOOD, decision: 'already_fixed', files: ['src/auth/x.py'] }), 'already_fixed');
+  const { comment } = run({ ...GOOD, decision: 'already_fixed' });
+  assert.match(comment, /looks already fixed/);
+});
+
+test('an admin override still builds an already-fixed report', () => {
+  const { verdict } = run({ ...GOOD, decision: 'already_fixed' }, { OVERRIDE: 'true' });
+  assert.equal(verdict.decision, 'work');
+});
+
+test('questions reach the score marker and the comment, capped at three', () => {
+  const qs = ['Which screen?', 'What was the exact error?', 'Every time?', 'A fourth?', '  '];
+  const { comment } = run({ ...GOOD, questions: qs });
+  const marker = JSON.parse(comment.match(/<!-- autopilot-verdict (.*) -->/)[1]);
+  assert.deepEqual(marker.questions, ['Which screen?', 'What was the exact error?', 'Every time?']);
+  assert.match(comment, /Questions for the reporter/);
+});

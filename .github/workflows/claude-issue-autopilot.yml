@@ -525,14 +525,15 @@ jobs:
           # Strip every outcome label before adding one, so a re-run never
           # leaves the issue claiming two. Beacon's webhook reads these.
           case "$DECISION" in
-            work)  ADD=autopilot-queued ;;
-            offer) ADD=autopilot-offered ;;
-            *)     ADD=needs-human ;;
+            work)          ADD=autopilot-queued ;;
+            offer)         ADD=autopilot-offered ;;
+            already_fixed) ADD=autopilot-already-fixed ;;
+            *)             ADD=needs-human ;;
           esac
           # All three come off, the new one included, because re-adding a label
           # that's already there sends no `labeled` event and Beacon would miss
           # the new result.
-          for L in autopilot-queued autopilot-offered needs-human; do
+          for L in autopilot-queued autopilot-offered autopilot-already-fixed needs-human; do
             gh issue edit "$ISSUE" -R "$REPO" --remove-label "$L" >/dev/null 2>&1 || true
           done
           gh issue edit "$ISSUE" -R "$REPO" --add-label "$ADD" || true
