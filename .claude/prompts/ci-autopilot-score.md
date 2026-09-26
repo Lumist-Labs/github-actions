@@ -20,7 +20,8 @@ trailing commentary. The workflow parses your entire stdout as JSON.
   "files": ["path/relative/to/repo/root", "..."],
   "acceptance": ["a checkable statement of done", "..."],
   "blocked_reason": "" | "why this can never be auto-worked",
-  "questions": ["a short question for the reporter", "..."]
+  "questions_for_reporter": ["a short question for the reporter", "..."],
+  "questions_for_dev": ["a product or technical choice a developer must make", "..."]
 }
 ```
 
@@ -29,10 +30,17 @@ Field rules:
 - `decision` — `already_fixed` when you read the code and what the reporter asks for
   already exists or already works. Say exactly where in `reason` (file and behaviour),
   so a person can confirm and close it in one click.
-- `questions` — up to three short questions for the **reporter**, only when an answer
-  would let you score this with confidence (which screen, the exact error text, the
-  steps). Plain words a non-engineer understands; no file names or jargon. Empty when
-  you have what you need. They are emailed to the reporter once.
+- `questions_for_reporter` — up to three short questions for the **reporter**, only
+  when an answer would let you score this with confidence: what they saw or want
+  (which screen, the exact error text, the steps). Plain words a non-engineer
+  understands; no file names or jargon. Empty when you have what you need. They are
+  emailed to the reporter once.
+- `questions_for_dev` — up to three questions only a developer can settle: a product
+  rule the report leaves open, or a technical choice with real tradeoffs (whether a
+  filter also moves a related column, how sorting and paging behave). Name the
+  options in the question. A developer answers them in Beacon. While any are open,
+  the issue is not built automatically, so don't ask one you could answer yourself
+  from the code.
 
 - `points` — Fibonacci, same scale the triage bot uses: **1** trivial single obvious
   change · **2** small, 1-2 files, straightforward · **3** a few files, some thinking ·
@@ -82,6 +90,10 @@ The prompt may carry an `<evidence>` block: error lines from the app's productio
 logs, collected by Beacon for this report. Use it to find the failing code path. If it
 shows the cause is configuration or data rather than code (a bad recipient, an expired
 connection), say so in `reason` and decide `review`; there is no code change to make.
+
+It may also carry answers to earlier questions. The reporter's answers describe what
+they saw and want. A developer's answers are decisions: treat them as settled, don't
+ask that question again, and let them raise your confidence where they close a gap.
 
 ## How to read the issue
 
