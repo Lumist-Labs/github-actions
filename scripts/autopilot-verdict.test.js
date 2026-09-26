@@ -206,3 +206,20 @@ test('a path both blocked and sensitive stays blocked on Start anyway', () => {
 test('no sensitive paths configured matches nothing', () => {
   assert.equal(run(GOOD, { SENSITIVE_PATHS: '' }).verdict.decision, 'work');
 });
+
+test('dev questions reach the marker, the comment, and keep it off auto', () => {
+  const r = run({ ...GOOD, questions_for_dev: ['Should Last Contacted follow the period, or stay all-time?'] });
+  assert.equal(r.verdict.decision, 'offer');
+  const marker = JSON.parse(r.comment.match(/<!-- autopilot-verdict (\{.*?\}) -->/)[1]);
+  assert.deepEqual(marker.questions_for_dev, ['Should Last Contacted follow the period, or stay all-time?']);
+  assert.deepEqual(marker.questions, []);
+  assert.match(r.comment, /\*\*Questions for a developer:\*\*/);
+});
+
+test('questions_for_reporter lands in the old questions field Beacon reads', () => {
+  const r = run({ ...GOOD, questions_for_reporter: ['Which page?'] });
+  const marker = JSON.parse(r.comment.match(/<!-- autopilot-verdict (\{.*?\}) -->/)[1]);
+  assert.deepEqual(marker.questions, ['Which page?']);
+  assert.deepEqual(marker.questions_for_dev, []);
+  assert.equal(r.verdict.decision, 'work');
+});

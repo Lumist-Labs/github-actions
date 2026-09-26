@@ -77,10 +77,14 @@ const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : '';
 const blockedReason = typeof parsed.blocked_reason === 'string' ? parsed.blocked_reason.trim() : '';
 // Missing or unrecognised reads as low, so a model that drops the field fails closed.
 const confidence = ['high', 'medium', 'low'].includes(parsed.confidence) ? parsed.confidence : 'low';
-const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
-  .filter((q) => typeof q === 'string' && q.trim())
-  .map((q) => q.replace(/\s+/g, ' ').trim().slice(0, 200))
-  .slice(0, 3);
+const cleanQuestions = (list) =>
+  (Array.isArray(list) ? list : [])
+    .filter((q) => typeof q === 'string' && q.trim())
+    .map((q) => q.replace(/\s+/g, ' ').trim().slice(0, 200))
+    .slice(0, 3);
+// `questions` is the older name for the reporter's list; Beacon still reads it.
+const questions = cleanQuestions(parsed.questions_for_reporter ?? parsed.questions);
+const questionsForDev = cleanQuestions(parsed.questions_for_dev);
 
 // Collected rather than returned early, so the comment can list every one that
 // fired. `unsafe` is always review. `judged` is review unless an admin
@@ -129,6 +133,10 @@ if (sensitiveHits.length) {
 // protected paths before anything is pushed, so that guard still holds.
 if (!files.length) {
   soft.push('the scoring pass named no files');
+}
+// An open product or technical choice is a person's call, so it never auto-builds.
+if (questionsForDev.length) {
+  soft.push(`${questionsForDev.length} open question(s) for a developer`);
 }
 if (!acceptance.length) {
   soft.push('no acceptance criteria');
@@ -179,7 +187,7 @@ const md = [];
 // Hidden marker carrying the score as JSON. The work job finds its brief by
 // the marker, and Beacon stores the score from it. `--` is escaped so nothing
 // in a reason can close the HTML comment early.
-const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived, questions })
+const scoreData = JSON.stringify({ decision, points: validPoints ? points : null, confidence, reason, objections, waived, questions, questions_for_dev: questionsForDev })
   .replace(/--/g, '-\\u002d');
 md.push(`<!-- autopilot-verdict ${scoreData} -->`);
 md.push('### Autopilot score');
@@ -212,6 +220,12 @@ if (questions.length) {
   md.push('**Questions for the reporter:**');
   md.push('');
   questions.forEach((q) => md.push(`- ${visible(q)}`));
+  md.push('');
+}
+if (questionsForDev.length) {
+  md.push('**Questions for a developer:**');
+  md.push('');
+  questionsForDev.forEach((q) => md.push(`- ${visible(q)}`));
   md.push('');
 }
 if (decision === 'review') {
