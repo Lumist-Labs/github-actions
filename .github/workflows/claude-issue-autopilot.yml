@@ -298,6 +298,7 @@ jobs:
       decision: ${{ steps.verdict.outputs.decision }}
       points: ${{ steps.verdict.outputs.points }}
       branch: ${{ steps.verdict.outputs.branch }}
+      stale-branches: ${{ steps.guard.outputs.stale }}
     steps:
       # Checked before anything else because `repo` feeds token scoping, git
       # URLs and every gh call below.
@@ -370,10 +371,23 @@ jobs:
             echo "Issue #$ISSUE is already labelled autopiloted — nothing to do."
             echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          if grep -qE "^[^/]+/${ISSUE}-" <<< "$BRANCHES"; then
-            echo "A branch for issue #$ISSUE already exists — nothing to do."
+          # A branch only blocks while someone might still want it: an open or
+          # merged PR, or no PR at all (a person's own branch). An Autopilot PR
+          # closed without merging is a scrapped attempt; Retry builds over it.
+          stale=""
+          while IFS= read -r branch; do
+            [ -z "$branch" ] && continue
+            scrapped=$(gh pr list -R "$REPO" --head "$branch" --state all --json state,body \
+              -q 'length > 0 and all(.[]; .state == "CLOSED" and (.body | contains("Opened automatically by [Autopilot]")))')
+            if [ "$scrapped" = true ]; then
+              echo "Branch $branch only carries a closed Autopilot PR — treating it as scrapped."
+              stale="$stale $branch"
+              continue
+            fi
+            echo "A branch for issue #$ISSUE already exists ($branch) — nothing to do."
             echo "proceed=false" >> "$GITHUB_OUTPUT"; exit 0
-          fi
+          done < <(grep -E "^[^/]+/${ISSUE}-" <<< "$BRANCHES" || true)
+          echo "stale=${stale# }" >> "$GITHUB_OUTPUT"
           echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       - name: Checkout target repository
@@ -1040,6 +1054,7 @@ jobs:
           BASE: ${{ inputs.base-branch }}
           BASE_SHA: ${{ steps.prep.outputs.base }}
           PR: ${{ inputs.pr }}
+          STALE: ${{ needs.score.outputs.stale-branches }}
           SETUP: ${{ inputs.setup }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
@@ -1088,7 +1103,10 @@ jobs:
           git reset --soft "$BASE_SHA"
           git commit -F /tmp/commit-msg.txt
 
-          git push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
+          # Over a scrapped attempt's branch (its PR closed unmerged), not past a live one.
+          FORCE=""
+          if [[ " $STALE " == *" $BRANCH "* ]]; then FORCE="--force"; fi
+          git push $FORCE "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${BRANCH}"
 
           if [ "$MODE" = override ]; then WHY="a Beacon admin started it"; else WHY="it scored **${POINTS} points**"; fi
           {
