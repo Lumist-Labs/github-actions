@@ -1092,17 +1092,10 @@ jobs:
 
           if [ "$MODE" = override ]; then WHY="a Beacon admin started it"; else WHY="it scored **${POINTS} points**"; fi
           {
-            echo "> Opened automatically by [Autopilot](${RUN_URL}) because ${WHY}."
-            echo ">"
-            if [ -n "$SETUP" ]; then
-              echo "> **Draft on purpose.** Claude ran the tests it wrote and those for the files"
-              echo "> it changed, not the whole suite; CI on this pull request runs that. Review it"
-              echo "> as you would any other PR, and then some."
-            else
-              echo "> **Draft on purpose.** No tests or lint ran before this push — the checks"
-              echo "> on this pull request are the first verification it has had. Review it as"
-              echo "> you would any other PR, and then some."
-            fi
+            # Beacon recognises an Autopilot PR by this line's opening words.
+            if [ -n "$SETUP" ]; then TESTED="Claude ran the new and affected tests; CI runs the rest."
+            else TESTED="Nothing ran before this push; CI is the first check."; fi
+            echo "> Opened automatically by [Autopilot](${RUN_URL}) because ${WHY}. ${TESTED}"
             echo ""
             # In the body, outside the blockquote, because close-issues-on-develop
             # greps the PR body, not the commit.
