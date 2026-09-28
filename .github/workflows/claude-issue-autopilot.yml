@@ -908,9 +908,13 @@ jobs:
               .filter((x) => typeof x === "string" && x.trim())
               .slice(0, 3)
               .map((x) => x.replace(/\s+/g, " ").trim().slice(0, 300));
+            // With a diff too, the questions stay in the PR body for the reviewer
+            // rather than vanish; only a no-change run hands them back.
             const cleaned = body
               .replace(/<findings>[\s\S]*?<\/findings>/, "")
-              .replace(/<questions>[\s\S]*?<\/questions>/, "");
+              .replace(/<questions>[\s\S]*?<\/questions>/, asked.length
+                ? "\n**Open questions:**\n" + asked.map((x) => `- ${x}`).join("\n")
+                : "");
             fs.writeFileSync("/tmp/pr-body.md", cleaned.trimEnd() + "\n");
             fs.writeFileSync("/tmp/findings.json", JSON.stringify(found));
             fs.writeFileSync("/tmp/questions.json", JSON.stringify(asked));
@@ -954,6 +958,9 @@ jobs:
             # Stopped rather than guess: the questions go back to Beacon, not a failure.
             echo "questions=true" >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+          if [ -s /tmp/changed.txt ] && [ "$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/questions.json","utf8")).length)')" -gt 0 ]; then
+            echo "::warning::Claude changed files and also asked questions; they're in the PR body for the reviewer."
           fi
           if [ ! -s /tmp/changed.txt ]; then
             # Its PR body says why (already fixed, not a code change, needs a
@@ -1173,7 +1180,9 @@ jobs:
           # Beacon moves the card on the `labeled` event.
           gh issue edit "$ISSUE" -R "$REPO" --remove-label autopilot-offered --remove-label autopilot-queued \
             || echo "::warning::could not clear the old Autopilot labels on #$ISSUE"
-          gh issue edit "$ISSUE" -R "$REPO" --add-label autopilot-offered
+          # Released too: nobody is building it now, a person has to answer first.
+          gh issue edit "$ISSUE" -R "$REPO" --add-label autopilot-offered --remove-assignee LumistBot \
+            || echo "::warning::could not label #$ISSUE autopilot-offered; Beacon's card won't move until it is"
 
       # Its own token, because a failure before the write token was minted
       # would otherwise leave the issue sitting there looking queued.
