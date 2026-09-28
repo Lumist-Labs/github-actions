@@ -347,6 +347,8 @@ jobs:
           repositories: ${{ steps.target.outputs.name }}
           permission-contents: read
           permission-issues: write
+          # The repeat guard reads a branch's PRs to tell a scrapped attempt from a live one.
+          permission-pull-requests: read
 
       # Never work the same issue twice. Either marker is enough on its own: the
       # label survives a branch deletion, the branch survives a stripped label.
@@ -377,8 +379,11 @@ jobs:
           stale=""
           while IFS= read -r branch; do
             [ -z "$branch" ] && continue
-            scrapped=$(gh pr list -R "$REPO" --head "$branch" --state all --json state,body \
-              -q 'length > 0 and all(.[]; .state == "CLOSED" and (.body | contains("Opened automatically by [Autopilot]")))')
+            if ! scrapped=$(gh pr list -R "$REPO" --head "$branch" --state all --json state,body \
+              -q 'length > 0 and all(.[]; .state == "CLOSED" and (.body | contains("Opened automatically by [Autopilot]")))'); then
+              echo "::warning::Couldn't read the PRs on $branch; treating it as live, so this run stops."
+              scrapped=false
+            fi
             if [ "$scrapped" = true ]; then
               echo "Branch $branch only carries a closed Autopilot PR — treating it as scrapped."
               stale="$stale $branch"
