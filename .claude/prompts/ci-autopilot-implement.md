@@ -90,7 +90,8 @@ reviewer can read it in under a minute. Use exactly these headings:
 Each bullet is one short sentence, under 25 words. No paragraphs, no file-by-file
 list (the diff has that), no restating the issue, no narrating what you did. No
 emoji or marketing. If an assumption would decide the fix, you should have asked
-instead (see "Ask, don't guess").
+instead (see "Ask, don't guess"): then there's no Fix or Tests, just a few bullets on
+what you found, and the questions block.
 
 ## Other bugs you find
 
