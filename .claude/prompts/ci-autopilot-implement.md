@@ -77,20 +77,21 @@ aren't questions. Make them and move on.
 
 ## Output
 
-Your stdout becomes the body of a draft pull request. Write it for the reviewer, in the
-shape the project's PR template asks for if it has one. Cover:
+Your stdout becomes the body of a draft pull request. Facts only, as bullets, so a
+reviewer can read it in under a minute. Use exactly these headings:
 
-- **Problem** — what was wrong, in the reporter's terms.
-- **Solution** — what you changed and why that is the right place for it.
-- **Files touched** — each path with one line on what moved.
-- **Tests** — the test you added and what it would catch. Name anything you could not
-  run here.
-- **For the reviewer** — anything you were unsure about that didn't decide the fix, and
-  any part of the issue you deliberately did not address. Be specific. If an
-  assumption would decide the fix, you should have asked instead (see "Ask, don't
-  guess").
+- **Problem**: one bullet, in the reporter's terms.
+- **Fix**: what changed and where, one bullet per change, at most four.
+- **Tests**: what you added and what it catches, and what ran and passed. One bullet
+  each; name anything that didn't run.
+- **For the reviewer**: only what they must check or decide. Leave it out when there's
+  nothing.
 
-Plain prose. No emoji, no marketing, no summary of your own process.
+Each bullet is one short sentence, under 25 words. No paragraphs, no file-by-file
+list (the diff has that), no restating the issue, no narrating what you did. No
+emoji or marketing. If an assumption would decide the fix, you should have asked
+instead (see "Ask, don't guess"): then there's no Fix or Tests, just a few bullets on
+what you found, and the questions block.
 
 ## Other bugs you find
 
