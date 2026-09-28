@@ -50,10 +50,30 @@ diffing against their own expectations, and every unrelated line costs them.
 
 ## Verification
 
-Run whatever fast, offline checks the project documents (its `CLAUDE.md` usually names a
-lint and an offline test command). If the toolchain is not installed on this machine,
-that is expected — the consumer's CI runs the real suite on the pull request. Do not
-spend turns installing toolchains; note what you could not run and move on.
+When the prompt says the project's test tooling is installed, it is, with its database
+if it has one: run the tests you wrote, the existing tests for the files you changed,
+and the lint the project's `CLAUDE.md` names. A check that fails to start is something
+to fix or report plainly, not to skip quietly. Without that line there is no tooling;
+don't spend turns installing it, and say what you couldn't run.
+
+## Ask, don't guess
+
+Don't build on an assumption. If the right fix depends on something you can't confirm
+from the code, the report, its screenshots, the logs or the answers already in the
+evidence, change nothing. Examples: which screen the reporter meant, which of two
+behaviours they want, or whether a setting is meant to apply everywhere. Explain what
+you found, then end with:
+
+```
+<questions>["Which screen: agent chat, or the workflow runner?", "..."]</questions>
+```
+
+Up to three questions, each naming the options. A developer answers them in Beacon, and
+the issue is scored and built again with those answers. One question costs a minute; a
+PR built on the wrong guess costs a review and a revert.
+
+Small choices the code already settles, like naming, placement or an obvious default,
+aren't questions. Make them and move on.
 
 ## Output
 
@@ -65,9 +85,10 @@ shape the project's PR template asks for if it has one. Cover:
 - **Files touched** — each path with one line on what moved.
 - **Tests** — the test you added and what it would catch. Name anything you could not
   run here.
-- **For the reviewer** — anything you were unsure about, any assumption you made, any
-  part of the issue you deliberately did not address. Be specific. This section is the
-  reason a human is reading, so do not leave it empty to look confident.
+- **For the reviewer** — anything you were unsure about that didn't decide the fix, and
+  any part of the issue you deliberately did not address. Be specific. If an
+  assumption would decide the fix, you should have asked instead (see "Ask, don't
+  guess").
 
 Plain prose. No emoji, no marketing, no summary of your own process.
 
