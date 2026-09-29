@@ -32,7 +32,7 @@ Reusable workflows and composites share that one tag. They also reference each o
 | Change | Bump |
 |---|---|
 | New action; no change to existing actions | minor |
-| Internal refactor or doc-only change | patch |
+| Internal refactor or doc-only change | none, unless titled `fix:` (only `feat:`/`fix:` release) |
 | Bug fix in an existing action, no caller-visible behavior change | patch |
 | New optional input or new behavior, default unchanged | minor |
 | Renamed/removed input or output, default change, breaking shape change to any action | **major** |

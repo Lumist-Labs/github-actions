@@ -104,7 +104,9 @@ project-slug: lumist-labs-internal
 
 ### Layering multiple loads (shared + project-specific)
 
-A workflow that loads from both a shared project (`lumist-labs-shared`) **and** a project-specific project (`lumist-labs-internal`, `lumist-labs-external`, ...) writes to the same `$GITHUB_ENV`. The action exports each resolved secret with `core.exportVariable`, so **the last load to write a given key wins**.
+A workflow that loads from both a shared project (`lumist-labs-shared`) **and** a project-specific project (`lumist-labs-internal`, `lumist-labs-external`, ...) writes to the same `$GITHUB_ENV`. The action exports each resolved secret with `core.exportVariable`, so **the last load to write a given key wins**. Dotenv mode is the exception: each
+dotenv render only contains keys not already exported earlier in the job, so there the
+first load wins (see the merge step in `actions/vps-deploy-core/action.yml`).
 
 If `lumist-labs-shared` is loaded **recursively** at `/`, its subfolders may contain keys with the same name as project-specific keys (e.g. `lumist-labs-shared/terraform/entra/MICROSOFT_CLIENT_ID` vs `lumist-labs-internal/<your-app>/MICROSOFT_CLIENT_ID`). To avoid a shared-infra key silently shadowing your project's value, **load the shared project first and the project-specific project second**:
 

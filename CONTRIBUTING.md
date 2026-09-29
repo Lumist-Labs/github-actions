@@ -76,7 +76,7 @@ Bump rules:
 
 | Change | Bump |
 |---|---|
-| Internal refactor, no caller-visible change | patch |
+| Internal refactor, no caller-visible change | patch (title it `fix:`; `refactor:` does not release) |
 | New optional input, new output, additional behavior behind a flag | minor |
 | Renamed/removed input or output, default change, behavior change that affects existing callers | **major** — bump the moving tag too |
 

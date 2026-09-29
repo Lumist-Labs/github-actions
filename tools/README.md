@@ -2,7 +2,7 @@
 
 **Admin / one-off bash scripts** run by a maintainer from a local checkout. These don't ship to consumer workflows — they manage org-wide GH config (secrets, vars, env stores) where `gh` CLI auth as a human user is required.
 
-For runtime scripts that consumer workflows fetch + execute on the VPS, see [`../scripts/`](../scripts/).
+For scripts the workflows and actions run, see [`../scripts/`](../scripts/).
 
 ## Available tools
 
@@ -28,4 +28,4 @@ These scripts assume:
 
 `scripts/` is for what workflows and actions run — executed unattended, so security-sensitive and version-pinned. `tools/` is for admin one-offs — invoked by hand, may make destructive changes (delete secrets, alter env config), require human attention.
 
-Mixing the two in one directory blurred audiences and security models. Splitting clarifies: anything in `scripts/` is OK to fetch from a workflow; anything in `tools/` is local-only.
+Mixing the two in one directory blurred audiences and security models. Splitting clarifies: `scripts/` is consumed by workflows (shipped by an action, never fetched by URL — see `scripts/README.md`); `tools/` is local-only.

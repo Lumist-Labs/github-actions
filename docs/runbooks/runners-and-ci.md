@@ -51,8 +51,9 @@ push and PR create leaves an orphan branch).
 The three VPS workflows also share a job-level group keyed on the target,
 `vps-<caller repo>-<vps-user>-<repo-dir>`, because they all check out, recreate or
 restart containers in the same directory. Deploy and copy-db queue on it. `rollback-vps-shared` sets
-`cancel-in-progress: true` on that group: a rollback pre-empts a running deploy
-rather than waiting behind it.
+`cancel-in-progress: true` on that group (its workflow-level group stays `false`): a
+rollback pre-empts a running deploy rather than waiting behind it.
+`deploy-concurrency-group` overrides the key; it must match across all three.
 
 ## actionlint
 
@@ -129,9 +130,9 @@ git config --global --add safe.directory "$GITHUB_WORKSPACE"
 - `paths-ignore` for documentation. **Name the paths; do not use `**/*.md`** —
   markdown under `src/` is often a code input (lumios ships `SKILL.md` library
   seeds and a `rubric.md` that drives behaviour). `*.md` matches root only.
-- Do not put `paths-ignore` on a `push` to a release branch: `release.yml`
-  consumes a CI `workflow_run` for the exact SHA, so skipping CI strands the
-  release gate.
+- Do not put `paths-ignore` on a `push` to a release branch: a consumer's
+  `release.yml` shim over `release-shared.yml` with `ci-gated: true` consumes a CI
+  `workflow_run` for the exact SHA, so skipping CI strands the release gate.
 - Before adding a path filter, check whether the check is **required** in branch
   protection. A required check that never reports leaves PRs pending forever; the
   alternative is an always-running `changes` gate job with the heavy jobs

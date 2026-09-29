@@ -6,7 +6,7 @@ person. The PR's own CI is the full test run the change gets.
 
 Beacon runs it. Its dispatcher, `beacon/.github/workflows/autopilot.yml`, is the
 only caller: Beacon dispatches it with `repo`, `issue` and `mode` (plus `evidence`,
-and `pr`/`branch`/`ci_logs` for a fix run), and the dispatcher looks up that repo's
+and `pr`/`branch`/`ci_logs` for a fix run, passed on as `ci-logs`), and the dispatcher looks up that repo's
 settings in `beacon/.github/autopilot-repos.json`. Target repos carry no autopilot
 files. Beacon's side of the loop: beacon `docs/features/auto-dev-loop/CONNECTING.md`.
 
@@ -19,7 +19,7 @@ unsupervised change and runs only when Beacon asks.
 - `auto` — Beacon dispatches it on promote. The thresholds apply.
 - `override` — a Beacon admin's Start anyway. It waives size, confidence,
   sensitive paths and the model's own `review`. It never waives blocked paths,
-  unparseable output, invalid points or a bad branch.
+  a non-empty `blocked_reason`, unparseable output, invalid points or a bad branch.
 - `fix` — Beacon dispatches it when an Autopilot PR's CI fails. It skips `score`,
   checks out the PR's branch and pushes a fix to it. It fails without `ci-logs`.
   Beacon caps it at `MAX_FIX_ATTEMPTS` (2) per PR in
@@ -103,10 +103,11 @@ hidden `<!-- autopilot-verdict {json} -->` marker. Beacon stores the score from
 it, `questions` (reporter) and `questions_for_dev` included; the `work` job
 re-reads it as its brief.
 
-`work` then checks both patterns a third time, against the diff that actually
+`work` then checks the path patterns a third time, against the diff that actually
 happened on disk. A blocked hit refuses the push in every mode. A sensitive hit
-refuses it in `auto`. In `override` and `fix` it pushes, labels the PR
-`autopilot-sensitive` and lists the files at the top of the PR body. Three layers
+refuses it in `auto`. In `override` it pushes, labels the PR `autopilot-sensitive`
+and lists the files at the top of the PR body; in `fix` it labels the PR and lists
+the files in its PR comment. Three layers
 because the first two are both statements of intent and only the third is a fact.
 A pattern `grep -E` can't compile stops the push too, since JS accepts syntax
 (lookarounds) that ERE doesn't.
@@ -157,8 +158,9 @@ verbatim. So neither pass holds a token that can write to GitHub:
 Both jobs always run in `container-image` (default `ghcr.io/lumist-labs/ci-node:22`;
 Beacon sets `ci-autopilot-python` or `ci-autopilot-elixir` per repo). That keeps
 Bash off the runner host and avoids the uid-0 checkout failure on shared
-self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`
-and whatever the container can reach on the network.
+self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`,
+the network, and the job's GitHub OIDC request credentials (`work` has
+`id-token: write`, and the runner exposes them to every step).
 
 Untrusted inputs the prompts receive, all marked as data rather than instructions:
 

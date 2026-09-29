@@ -20,7 +20,8 @@ Public repo. Base branch `main`, no `develop`. PRs go to `main`.
 
 ## Checks (what CI runs)
 
-`lint-workflows.yml` on PRs touching `.github/workflows/**`, `actions/**` or `scripts/**`:
+`lint-workflows.yml` on PRs (and pushes to `main`) touching `.github/workflows/**`,
+`actions/**` or `scripts/**`:
 
 ```sh
 actionlint -color -shellcheck=      # CI pins actionlint 1.7.12
@@ -29,7 +30,8 @@ node --test scripts/*.test.js       # node 22
 ```
 
 - `smoke-teams-notify.yml`: PRs touching `actions/teams-notify/**`, dry-run payload asserts.
-- `ci-images.yml`: PRs touching `images/**` build each image and run its `smoke.sh`.
+- `ci-images.yml`: PRs touching `images/**` build each image and run its `smoke.sh`
+  (the two `autopilot-*` images have none, so the step passes without testing them).
   Push to `main`, the Sunday cron and dispatch also publish to `ghcr.io/lumist-labs/ci-*`.
 - Nothing else is tested here. Reusable workflows are only exercised by a consumer run.
 
@@ -40,6 +42,7 @@ node --test scripts/*.test.js       # node 22
 - `feat:` → minor, `fix:` → patch, `feat!:`/`fix!:`/`BREAKING CHANGE` → major. It tags
   `vX.Y.Z` and moves `v2`.
 - `chore:`, `docs:`, `refactor:`, `test:`, `style:`, `ci:`, `build:` → no release.
+  So does anything else, including a scoped breaking title like `feat(x)!:`.
 
 The trap: a `chore:` merge sits on `main` unreleased and ships silently with the next
 `feat:`. #127 (a `chore:` that broke every VPS deploy) went live 8 days later that way;

@@ -76,7 +76,8 @@ not the build.
 
 1. Add `images/<dir>/Dockerfile`.
 2. Add `images/<dir>/smoke.sh` — assert *every* tool the consuming workflow
-   stopped installing. This runs on each build; a missing package is a red PR
+   stopped installing. A missing file runs as an empty script and passes, which is
+   the state of both `autopilot-*` images today. This runs on each build; a missing package is a red PR
    check instead of six repos failing their next run.
 3. Add an entry to [`manifest.json`](manifest.json) (`dir`, `image`, `tag`,
    `consumers`). The build matrix reads it — no workflow edit needed.
@@ -89,7 +90,8 @@ must always be Elixir 1.18.4 on OTP 27.
 
 ## `force-unsafe-io`
 
-Every Dockerfile starts by disabling `dpkg`'s per-file fsync:
+Every base Dockerfile starts by disabling `dpkg`'s per-file fsync (the `autopilot-*`
+images inherit it from their base but add an `apt-get` layer without it):
 
 ```dockerfile
 RUN echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/02speedup
