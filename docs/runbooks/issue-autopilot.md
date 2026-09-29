@@ -24,6 +24,12 @@ unsupervised change and runs only when Beacon asks.
   checks out the PR's branch and pushes a fix to it. It fails without `ci-logs`.
   Beacon caps it at `MAX_FIX_ATTEMPTS` (2) per PR in
   `backend/app/services/autopilot_ready.py`.
+- `revise` — Beacon dispatches it when a person asks for changes on an Autopilot
+  PR, from Beacon's Request changes box or a changes-requested review. It skips
+  `score`, checks out the PR's branch, gives Claude `feedback` (first 8000
+  characters, as data) and pushes one commit, `fix: #<issue> address review feedback`.
+  It fails without `feedback`. The PR comment opens with
+  `<!-- autopilot-revised {"run": "<url>"} -->`, which Beacon counts per PR.
 
 Only Beacon holds a token that can dispatch, so admin rights live in Beacon and
 nowhere else.
