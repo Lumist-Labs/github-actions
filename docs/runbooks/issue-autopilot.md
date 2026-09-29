@@ -58,12 +58,13 @@ an autopilot PR with an empty checks list, the token is what broke.
 
 - `score` mints contents read, issues write and pull-requests read (the last for the
   repeat guard).
-- `work` mints a read-only token for the checkout, and the write token only after
-  Claude exits. The App can push to protected `main` for `release-shared.yml`; it
-  must never be in reach of a prompt-injected session.
-- `TARGET_REPO_TOKEN` is live for the whole `work` job. It never enters a Claude
-  step's environment or the checkout, but it is not scoped to after Claude, so
-  that path's guarantee is narrower.
+- `work` mints a read-only token for the checkout and never a write token.
+- `publish` runs on a fresh GitHub-hosted runner, applies `work`'s patch to a clean
+  checkout, re-checks it, and is the only job that mints the write token. The App
+  can push to protected `main` for `release-shared.yml`; it must never be in reach
+  of a prompt-injected session.
+- `TARGET_REPO_TOKEN` is a job secret in `work` for the checkout, but no step after
+  Claude reads it, and it never enters a Claude step's environment.
 
 ## The gate
 
@@ -164,10 +165,13 @@ request credentials to every step, and Infisical would trade a minted token for 
 identity that reads every app's secrets. The key comes only from the caller's
 forwarded `secrets.ANTHROPIC_API_KEY`.
 
-Still open: Claude runs as root in the same container as the later steps that
-hold the write token, so it could leave something behind for them (a git hook,
-a `$GITHUB_ENV` line, a process, a replaced binary). Moving publish into its
-own job that applies a patch is the planned fix.
+Claude runs as root in the `work` container, so anything later in that job is
+treated as tainted: it only packages the patch, PR body, questions and findings
+as an artifact. `publish` treats all of it as data.
+
+Still open: root in the container can write the runner's bind mounts, including
+the tool cache that later jobs on the same self-hosted host reuse. Running Claude
+as an unprivileged user closes that.
 
 Untrusted inputs the prompts receive, all marked as data rather than instructions:
 
