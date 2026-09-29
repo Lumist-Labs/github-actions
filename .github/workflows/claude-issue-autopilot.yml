@@ -828,19 +828,57 @@ jobs:
             echo "::warning::setup changed tracked files; they are kept out of the PR unless Claude edits them: $(cut -f2 /tmp/setup-dirty.txt | tr '\n' ' ')"
           fi
 
+      # Root in this container can write the runner's bind mounts (the tool cache
+      # and workspaces later jobs on this self-hosted host reuse) and read every
+      # root process's environment. Claude gets its own uid that can write only
+      # the checkout. .git stays root's, and Package refuses to run git unless it
+      # still is, since this uid owns the directory .git sits in and could swap it.
+      # The /tmp files root writes later are created now so it can't pre-plant them.
+      - name: Hand the checkout to an unprivileged user
+        id: sandbox
+        run: |
+          set -euo pipefail
+          owner=$(stat -c '%u:%g' .)
+          uid=59000
+          if [ "${owner%%:*}" = "$uid" ]; then uid=59001; fi
+          useradd --uid "$uid" --user-group --create-home --shell /bin/bash autopilot
+          git config --system --add safe.directory '*'
+          chown -R autopilot:autopilot .
+          chown -R root:root .git
+          chmod -R go-w .git
+          # Caches setup left in root's home, not its config (credentials live there).
+          for d in .cache .mix .hex .npm; do
+            if [ -d "/root/$d" ]; then cp -a "/root/$d" /home/autopilot/; fi
+          done
+          chown -R autopilot:autopilot /home/autopilot
+          chmod 644 /tmp/work-prompt.txt
+          touch /tmp/pr-body.md /tmp/work-stderr.log /tmp/findings.json /tmp/questions.json /tmp/autopilot-failure.txt
+          mkdir -p /tmp/autopilot-out
+          echo "uid=$uid" >> "$GITHUB_OUTPUT"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+
       # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.implement-model }}
           MAX_TURNS: ${{ inputs.max-turns }}
-          # The container runs as root, and Claude Code refuses bypassPermissions
-          # as root unless told it's sandboxed. It is: a throwaway container
-          # holding no GitHub token (the write token lives only in publish).
-          IS_SANDBOX: "1"
+          AUTOPILOT_UID: ${{ steps.sandbox.outputs.uid }}
         run: |
           set -euo pipefail
-          if ! claude \
+          # Nothing this uid starts outlives the step into the package step.
+          reap() {
+            for p in /proc/[0-9]*; do
+              if [ "$(stat -c '%u' "$p" 2>/dev/null)" = "$AUTOPILOT_UID" ]; then kill -KILL "${p#/proc/}" 2>/dev/null || true; fi
+            done
+          }
+          trap reap EXIT
+          # The runner's own variables stay with root; the key and the test env go through.
+          drop=()
+          while IFS= read -r v; do drop+=(-u "$v"); done < <(env | cut -d= -f1 | grep -E '^(ACTIONS_|GITHUB_|RUNNER_|INPUT_)' || true)
+          if ! setpriv --reuid="$AUTOPILOT_UID" --regid="$AUTOPILOT_UID" --clear-groups --no-new-privs \
+            env "${drop[@]}" HOME=/home/autopilot USER=autopilot LOGNAME=autopilot \
+            claude \
             --print \
             --model "$CLAUDE_MODEL" \
             --system-prompt-file .shared-actions/.claude/prompts/ci-autopilot-implement.md \
@@ -909,6 +947,12 @@ jobs:
           BASE_SHA: ${{ steps.prep.outputs.base }}
         run: |
           set -euo pipefail
+          # A .git Claude's uid put in place of root's could carry a hook or
+          # fsmonitor that the root git calls below would run.
+          if [ -L .git ] || [ ! -d .git ] || [ "$(stat -c '%u' .git)" != 0 ]; then
+            echo "::error::.git is no longer root's directory; Claude replaced it. Refusing to package." | tee -a /tmp/autopilot-failure.txt
+            exit 1
+          fi
           if [ "$(git rev-parse --abbrev-ref HEAD)" != "$BRANCH" ]; then
             echo "::error::Claude left $BRANCH (now on $(git rev-parse --abbrev-ref HEAD)). Refusing to push." | tee -a /tmp/autopilot-failure.txt
             exit 1
@@ -941,9 +985,14 @@ jobs:
           overwrite: true
           if-no-files-found: ignore
 
+      # The owner recorded before the handoff: by now `.` belongs to Claude's uid.
       - name: Return the workspace to the runner user
         if: always()
-        run: chown -R "$(stat -c '%u:%g' .)" .
+        env:
+          OWNER: ${{ steps.sandbox.outputs.owner }}
+        run: |
+          if [ -z "$OWNER" ]; then OWNER=$(stat -c '%u:%g' .); echo "sandbox step didn't run; restoring to the current owner $OWNER"; fi
+          chown -R "$OWNER" .
 
   # GitHub-hosted on purpose, not inputs.runner: Claude ran as root with the
   # self-hosted host's tool cache mounted, so a later job there could inherit
