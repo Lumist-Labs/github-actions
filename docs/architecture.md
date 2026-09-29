@@ -131,8 +131,9 @@ Runbook with the gate rules: [`runbooks/issue-autopilot.md`](runbooks/issue-auto
    `mode: override`.
 5. **`work` job** (on `work`, or `fix`): check out with a read-only token, re-read the brief
    from the verdict comment, run `setup` and Postgres, run Claude with
-   `ci-autopilot-implement.md` and no GitHub token, re-check the real diff, then mint the
-   write token, commit, push and open a **draft** PR whose body opens with the
+   `ci-autopilot-implement.md` and no GitHub token, and upload the patch as an artifact.
+   A **`publish` job** on a fresh hosted runner applies it to a clean checkout, re-checks
+   the real diff, then mints the write token, commits, pushes and opens a **draft** PR whose body opens with the
    blockquote `> Opened automatically by [Autopilot](<run>) because …`. The issue flips `autopilot-queued` → `autopiloted`.
    No change plus questions → the questions go back as an `offer`.
 6. **Fix mode.** When the PR's CI fails, Beacon collects the failing logs and dispatches
