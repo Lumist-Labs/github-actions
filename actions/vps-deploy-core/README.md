@@ -36,8 +36,8 @@ Callers must grant `id-token: write` and `contents: read`. Every input descripti
 | `repo-url` | no | `''` | Clone URL for `allow-clone` |
 | `github-token` | no | `github.token` | Lets an `https://` remote fetch a private repo. `''` keeps the box's own credential. `git@` remotes never use it |
 
-On every run it also repoints `origin` to the calling repo (same scheme) if the remote
-still names an old org.
+On every run it also repoints a `github.com` `origin` (https or `git@`) to the calling
+repo, keeping the scheme, when its owner/name differs.
 
 **Run**
 
@@ -71,6 +71,6 @@ No outputs.
 
 - **`--remove-orphans`.** Dev and prod share one compose project and Traefik runs as its
   own stack, so the only orphans it could find are live services.
-- **Relative sibling refs.** Every `uses:` inside is `Lumist-Labs/github-actions/…@v2`.
+- **Relative sibling refs.** Every sibling action inside is `Lumist-Labs/github-actions/…@v2`.
   A `./` ref resolves against the caller's checkout and fails every deploy on its first
   step (#127, reverted in #130).

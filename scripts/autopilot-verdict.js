@@ -16,8 +16,9 @@
 // branch prefix, or the point threshold.
 //
 // Four outcomes: `work` runs now, `offer` waits for a Beacon admin, `review`
-// goes to a human, `already_fixed` asks a person to confirm and close. Anything that makes the change unsafe or unauthorized is a
-// hard stop and always `review`; only size and confidence can land on `offer`.
+// goes to a human, `already_fixed` asks a person to confirm and close. Anything
+// that makes the change unsafe or unauthorized is a hard stop and always
+// `review`; only size and confidence can land on `offer`.
 //
 // OVERRIDE=true is a Beacon admin's trigger. It waives size, confidence and the
 // model's own `review`, never a stop that makes the change unsafe.
@@ -128,7 +129,7 @@ if (sensitiveHits.length) {
   judged.push(`touches sensitive paths — ${sensitiveHits.join(', ')}`);
 }
 
-// Judged, not unsafe: an admin's Start anyway must be able to build an issue
+// Soft, not unsafe: an admin's Start anyway must be able to build an issue
 // the scorer wouldn't scope. The work job re-checks the real diff against the
 // protected paths before anything is pushed, so that guard still holds.
 if (!files.length) {

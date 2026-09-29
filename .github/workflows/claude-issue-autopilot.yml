@@ -574,7 +574,7 @@ jobs:
             already_fixed) ADD=autopilot-already-fixed ;;
             *)             ADD=needs-human ;;
           esac
-          # All three come off, the new one included, because re-adding a label
+          # All four come off, the new one included, because re-adding a label
           # that's already there sends no `labeled` event and Beacon would miss
           # the new result.
           for L in autopilot-queued autopilot-offered autopilot-already-fixed needs-human; do

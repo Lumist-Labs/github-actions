@@ -59,14 +59,16 @@ group on the target, `vps-<caller repo>-<vps-user>-<repo-dir>`, overridable by
 2. Render `app-path` from `app-project-slug` to a dotenv file (OIDC, `include-imports`),
    then each non-empty `extra-shared-path-*` / `extra-app-path-*` (recursive), and
    concatenate. Keys must be disjoint across folders (see the merge step's comment).
-3. Append `VERSION=<ref>`; assert `required-keys` are present and non-empty.
+3. Append `VERSION=<ref>`; assert `required-keys` are present and non-empty; base64 the
+   file for transfer.
 4. Load `infra-path` (default `/tailscale`) from the shared project in env mode:
    `TAILSCALE_AUTHKEY`, `VPS_TAILSCALE_IP`, `VPS_SSH_KEY`. Never written to `.env`.
 5. `tailscale-connect`.
 6. On the VPS: fetch and check out `ref` in `repo-dir` (https remotes use the job token
    via `github-token`); clone only if `allow-clone: true`.
 7. Write the env file (base64 through `appleboy/ssh-action` `envs`).
-8. Optional pre-deploy DB snapshot (`db-type: sqlite|postgres`, skipped by `skip-pre-deploy`).
+8. Pre-deploy DB snapshot when `db-type` is `sqlite` or `postgres` and `skip-pre-deploy`
+   is false.
 9. Optional `pre-compose-up-script` (rollback's DB restore).
 10. `docker compose up -d` (`--build` unless `compose-build: false`, `--force-recreate`
     if set), or `deploy-command` instead.
@@ -83,8 +85,8 @@ Full descriptions live in each workflow's `inputs:` block.
 | `copy-prod-db-shared` | `environment`, `confirm: CLOBBER-DEV`, `infisical-identity-id`, `shared-project-slug`, `env-slug`, `vps-user`, `repo-dir`, `db-type`, `dev-compose-file` | `prod-/dev-db-container`, `prod-/dev-db-path` (sqlite), `db-name`/`prod-db-name`/`dev-db-name`, `db-user` (postgres), `dev-app-container`, `dev-healthcheck-containers`, `dev-backup-dir` |
 | `release-shared` | — | `ci-gated` (false), `deploy-workflow` (`deploy-prod.yml`, `''` skips), `major`, `node-version` (22), `runner` |
 
-`copy-prod-db-shared` sets `environment: production` only so the OIDC subject matches
-the Infisical trust policy; the write target is always dev. It loads infra credentials
+`copy-prod-db-shared`'s `environment` input exists so the OIDC subject matches the
+Infisical trust policy (callers pass `production`); the write target is always dev. It loads infra credentials
 only, no app `.env`.
 
 `release-shared` reads `secrets.RELEASE_BOT_PRIVATE_KEY` and declares no `secrets:`,
@@ -130,16 +132,17 @@ Runbook with the gate rules: [`runbooks/issue-autopilot.md`](runbooks/issue-auto
 5. **`work` job** (on `work`, or `fix`): check out with a read-only token, re-read the brief
    from the verdict comment, run `setup` and Postgres, run Claude with
    `ci-autopilot-implement.md` and no GitHub token, re-check the real diff, then mint the
-   write token, commit, push and open a **draft** PR whose body starts
-   `Opened automatically by [Autopilot]`. The issue flips `autopilot-queued` → `autopiloted`.
+   write token, commit, push and open a **draft** PR whose body opens with the
+   blockquote `> Opened automatically by [Autopilot](<run>) because …`. The issue flips `autopilot-queued` → `autopiloted`.
    No change plus questions → the questions go back as an `offer`.
 6. **Fix mode.** When the PR's CI fails, Beacon collects the failing logs and dispatches
    `mode: fix` with `pr`, `branch`, `ci-logs`; `work` pushes one commit to the branch and
    comments on the PR. Beacon allows two attempts (`backend/app/services/autopilot_ready.py::MAX_FIX_ATTEMPTS`).
    Green CI → Beacon dispatches `beacon/.github/workflows/autopilot-ready.yml` to mark
    the PR ready.
-7. **Failure** at any point comments an `<!-- autopilot-failure -->` marker and labels
-   `needs-human`. Beacon's Retry on a closed-unmerged Autopilot PR removes `autopiloted`
+7. **Failure** labels `needs-human`. A `work` failure comments an
+   `<!-- autopilot-failure -->` marker with the reason; a `score` failure posts a plain
+   "could not score" comment. Beacon's Retry on a closed-unmerged Autopilot PR removes `autopiloted`
    and dispatches again; the guard treats that branch as scrapped and `work` force-pushes.
 
 ## Release of this repo

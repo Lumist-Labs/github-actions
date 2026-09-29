@@ -262,7 +262,7 @@ on:
       deploy-concurrency-group:
         description: >-
           Override the serialisation key for VPS operations. Defaults to
-          `vps-<vps-user>-<repo-dir>`. Must match the value passed to
+          `vps-<caller repo>-<vps-user>-<repo-dir>`. Must match the value passed to
           `deploy-vps-shared` and `copy-prod-db-shared` for the same target, or
           a rollback can race a deploy in the shared `repo-dir`.
         required: false
