@@ -106,17 +106,24 @@ jobs:
       # its push URL, so this covers its pushes too. Its API calls keep
       # GITHUB_TOKEN on purpose: a Release created by the App would fire
       # `release: published` in deploy-prod on top of the dispatch below.
+      # Orgs without the App (aretecp) fall back to GITHUB_TOKEN, which works only
+      # where main doesn't block it; that was every caller's path before #137.
       - id: bot
+        if: vars.RELEASE_BOT_APP_ID != ''
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ vars.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
           permission-contents: write
 
+      - name: Say which identity pushes
+        if: vars.RELEASE_BOT_APP_ID == ''
+        run: echo "::notice::RELEASE_BOT_APP_ID is not set for this repo; release pushes go out as GITHUB_TOKEN, not lumist-release-bot."
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ steps.bot.outputs.token }}
+          token: ${{ steps.bot.outputs.token || github.token }}
           # workflow_run checks out the default branch otherwise, which is develop.
           ref: ${{ inputs.ci-gated && 'main' || '' }}
 
