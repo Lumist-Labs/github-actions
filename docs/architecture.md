@@ -91,7 +91,7 @@ only, no app `.env`.
 
 `release-shared` reads `secrets.RELEASE_BOT_PRIVATE_KEY` and declares no `secrets:`,
 so callers pass `secrets: inherit`. It pushes as `lumist-release-bot` (the `main`
-ruleset exempts it), runs semantic-release from the caller's `.releaserc.json`, then
+ruleset exempts it), or as `GITHUB_TOKEN` where `RELEASE_BOT_APP_ID` is unset (aretecp), runs semantic-release from the caller's `.releaserc.json`, then
 dispatches `deploy-workflow` on `main` with `version=<new tag>`. With `ci-gated: true`
 the caller triggers it from CI's `workflow_run`, and it refuses to tag a SHA CI didn't
 test.
