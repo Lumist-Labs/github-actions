@@ -19,7 +19,7 @@ referenced at `@v2` too, so one tag move ships the whole graph.
 | `release-shared.yml` | — (semantic-release in the caller's repo) | — |
 | `pr-to-main-hooks.yml` | `load-infisical-secrets` ×2 (CI Anthropic key, Teams webhook) | — |
 | `claude-issue-triage.yml` | `load-infisical-secrets` | `.claude/prompts/ci-triage.md` at `shared-ref` |
-| `claude-issue-autopilot.yml` | `load-infisical-secrets` (both jobs) | `.claude/prompts/ci-autopilot-{score,implement}.md`, `scripts/autopilot-verdict.js`, `scripts/autopilot-attachments.js` at `shared-ref` |
+| `claude-issue-autopilot.yml` | none (key is a forwarded secret) | `.claude/prompts/ci-autopilot-{score,implement}.md`, `scripts/autopilot-verdict.js`, `scripts/autopilot-attachments.js` at `shared-ref` |
 | `aws-deploy-core` | — (`aws-actions/configure-aws-credentials`, SHA-pinned) | `actions/aws-deploy-core/scripts/{ec2-compose-deploy,ecs-run-task}.sh`, from its own action checkout |
 | `ecr-build-push` | — (AWS and Docker upstream actions, SHA-pinned) | — |
 

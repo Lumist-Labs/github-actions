@@ -158,9 +158,16 @@ verbatim. So neither pass holds a token that can write to GitHub:
 Both jobs always run in `container-image` (default `ghcr.io/lumist-labs/ci-node:22`;
 Beacon sets `ci-autopilot-python` or `ci-autopilot-elixir` per repo). That keeps
 Bash off the runner host and avoids the uid-0 checkout failure on shared
-self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`,
-the network, and the job's GitHub OIDC request credentials (`work` has
-`id-token: write`, and the runner exposes them to every step).
+self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`
+and the network. Neither job requests `id-token`: the runner exposes OIDC request
+credentials to every step, and Infisical would trade a minted token for the org
+identity that reads every app's secrets. The key comes only from the caller's
+forwarded `secrets.ANTHROPIC_API_KEY`.
+
+Still open: Claude runs as root in the same container as the later steps that
+hold the write token, so it could leave something behind for them (a git hook,
+a `$GITHUB_ENV` line, a process, a replaced binary). Moving publish into its
+own job that applies a patch is the planned fix.
 
 Untrusted inputs the prompts receive, all marked as data rather than instructions:
 

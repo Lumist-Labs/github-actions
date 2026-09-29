@@ -45,12 +45,13 @@ name: Claude Issue Autopilot (shared)
 #
 # AUTHENTICATION
 # --------------
-# ANTHROPIC_API_KEY resolves exactly as in claude-issue-triage.yml: GitHub OIDC
-# into Infisical (`lumist-labs-internal/prod/github-actions`), with a forwarded
-# secret as the legacy fallback.
+# ANTHROPIC_API_KEY comes only from the caller's forwarded secret. Neither job
+# requests id-token: Claude reads untrusted issue text, and a job that can mint
+# an OIDC token lets it trade that token for the org's Infisical identity.
 #
 # REQUIRED CALLER CONFIG
-#   permissions: { contents: read, id-token: write }
+#   permissions: { contents: read }
+#   secrets.ANTHROPIC_API_KEY forwarded to this workflow.
 #   Either the App: vars.RELEASE_BOT_APP_ID (or the `app-id` input) and
 #   secrets.RELEASE_BOT_PRIVATE_KEY, installed on the TARGET repo with
 #   contents, pull-requests and issues write;
@@ -235,31 +236,10 @@ on:
         type: string
         default: ghcr.io/lumist-labs/ci-node:22
 
-      # --- OIDC path (preferred) — all four are optional OVERRIDES ---
-      infisical-identity-id:
-        description: 'Override the OIDC machine identity UUID. Defaults to the caller''s vars.INFISICAL_OIDC_IDENTITY_ID.'
-        required: false
-        type: string
-        default: ''
-      infisical-project-slug:
-        description: 'Override the Infisical project. Defaults to the caller''s vars.INFISICAL_INTERNAL_PROJECT_SLUG.'
-        required: false
-        type: string
-        default: ''
-      infisical-env:
-        description: 'Override the Infisical environment slug. Defaults to prod.'
-        required: false
-        type: string
-        default: ''
-      infisical-path:
-        description: 'Override the Infisical folder holding ANTHROPIC_API_KEY. Defaults to /github-actions.'
-        required: false
-        type: string
-        default: ''
     secrets:
       ANTHROPIC_API_KEY:
-        description: 'Anthropic API key. Required UNLESS the OIDC path resolves one.'
-        required: false
+        description: 'Anthropic API key.'
+        required: true
       RELEASE_BOT_PRIVATE_KEY:
         description: 'Private key of the GitHub App that acts on the target repo. Not needed with TARGET_REPO_TOKEN.'
         required: false
@@ -293,7 +273,6 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      id-token: write
     outputs:
       proceed: ${{ steps.guard.outputs.proceed }}
       decision: ${{ steps.verdict.outputs.decision }}
@@ -414,16 +393,6 @@ jobs:
           path: .shared-actions
           persist-credentials: false
 
-      - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
-        if: ${{ steps.guard.outputs.proceed == 'true' && (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
-        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
-        with:
-          method: oidc
-          identity-id: ${{ inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID }}
-          project-slug: ${{ inputs.infisical-project-slug || vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
-          environment: ${{ inputs.infisical-env || 'prod' }}
-          path: ${{ inputs.infisical-path || '/github-actions' }}
-
       # Fail with an actionable message rather than letting Claude die on an
       # opaque auth error a minute later.
       - name: Verify an API key resolved
@@ -431,12 +400,8 @@ jobs:
         env:
           FORWARDED_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-            echo "ANTHROPIC_API_KEY resolved via Infisical OIDC."
-          elif [ -n "$FORWARDED_KEY" ]; then
-            echo "ANTHROPIC_API_KEY resolved via forwarded secret (legacy path)."
-          else
-            echo "::error::No ANTHROPIC_API_KEY available. For the OIDC path the calling repo needs vars.INFISICAL_OIDC_IDENTITY_ID, the identity trusted for it, and read access on lumist-labs-internal/<env>/github-actions. Otherwise forward ANTHROPIC_API_KEY."
+          if [ -z "$FORWARDED_KEY" ]; then
+            echo "::error::No ANTHROPIC_API_KEY forwarded. The caller must pass secrets.ANTHROPIC_API_KEY."
             exit 1
           fi
 
@@ -513,7 +478,7 @@ jobs:
       - name: Run Claude scoring pass
         if: steps.guard.outputs.proceed == 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.claude-model }}
         run: |
           set -euo pipefail
@@ -633,7 +598,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Split the target repo
         id: target
@@ -708,22 +672,12 @@ jobs:
           # A fix run is already on the PR's branch.
           if [ "$MODE" != fix ]; then git checkout -b "$BRANCH"; fi
 
-      - name: Load ANTHROPIC_API_KEY from Infisical (OIDC)
-        if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
-        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
-        with:
-          method: oidc
-          identity-id: ${{ inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID }}
-          project-slug: ${{ inputs.infisical-project-slug || vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
-          environment: ${{ inputs.infisical-env || 'prod' }}
-          path: ${{ inputs.infisical-path || '/github-actions' }}
-
       - name: Verify an API key resolved
         env:
           FORWARDED_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "$FORWARDED_KEY" ]; then
-            echo "::error::No ANTHROPIC_API_KEY available in the work job, though the score job had one. Check the Infisical OIDC identity still trusts this repo." | tee -a /tmp/autopilot-failure.txt
+          if [ -z "$FORWARDED_KEY" ]; then
+            echo "::error::No ANTHROPIC_API_KEY forwarded to the work job." | tee -a /tmp/autopilot-failure.txt
             exit 1
           fi
 
@@ -874,7 +828,7 @@ jobs:
       # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass
         env:
-          ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY || secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.implement-model }}
           MAX_TURNS: ${{ inputs.max-turns }}
           # The container runs as root, and Claude Code refuses bypassPermissions
