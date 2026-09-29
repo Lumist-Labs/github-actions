@@ -122,9 +122,9 @@ jobs:
       app-project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
       env-slug: dev
       app-path: /myapp
-      vps-user: ubuntu
-      repo-dir: /srv/myapp
-      repo-url: https://github.com/aretecp/myapp.git
+      vps-user: ${{ vars.VPS_USER }}
+      repo-dir: /home/sglyon/myapp   # every app lives under /home/sglyon on the VPS
+      repo-url: https://github.com/Lumist-Labs/myapp.git
       compose-file: docker-compose.dev.yml
       env-file-name: .env.dev
       ref: ${{ inputs.ref || 'main' }}
@@ -140,14 +140,14 @@ jobs:
 
 ```bash
 # Check the rendered .env arrived correctly
-cat /srv/myapp/.env.dev | grep -v '=' | wc -l   # should be 0 (no blank key lines)
-wc -l /srv/myapp/.env.dev                         # should match expected count
+cat /home/sglyon/myapp/.env.dev | grep -v '=' | wc -l   # should be 0 (no blank key lines)
+wc -l /home/sglyon/myapp/.env.dev                         # should match expected count
 
 # Spot-check a known secret is present and non-empty
-grep 'DATABASE_URL' /srv/myapp/.env.dev | cut -d= -f1   # prints key only, not value
+grep 'DATABASE_URL' /home/sglyon/myapp/.env.dev | cut -d= -f1   # prints key only, not value
 
 # Verify VERSION was appended
-grep '^VERSION=' /srv/myapp/.env.dev
+grep '^VERSION=' /home/sglyon/myapp/.env.dev
 ```
 
 4. Confirm healthchecks pass and the app is serving traffic.
@@ -181,7 +181,7 @@ The primary `app-path` (in `app-project-slug`) is always rendered into the `.env
       # extra-shared-path-3: ...
 ```
 
-Precedence: extras are merged **first**, the primary `app-path` folder **last**, so on a duplicate key the app folder wins (matches the old "app load runs last" rule). Up to 3 extra folders; all live in `shared-project-slug`. (Infisical imports on the app folder still work too, and need no input — use whichever you prefer; `extra-shared-path-*` keeps the choice visible in the workflow.)
+**Keep every loaded folder's keys disjoint.** The files are concatenated extras first and `app-path` last, but that does not decide a collision: each dotenv load only sees keys not already exported earlier in the job, so a duplicate key keeps the first load's value (see the merge step in `actions/vps-deploy-core/action.yml`). Up to 3 extra shared folders, all in `shared-project-slug`; `extra-app-path-1/2/3` do the same for more folders in `app-project-slug`. (Infisical imports on the app folder still work too, and need no input — use whichever you prefer; `extra-shared-path-*` keeps the choice visible in the workflow.)
 
 ## Optional inputs — DB backup + compose flags
 
@@ -226,7 +226,7 @@ The shared workflow can snapshot the live DB **before** `compose up` recreates c
 
 ## Worked example — areteos (multi-shared-folder + Postgres)
 
-areteos is the case that exercises everything: it pulls SES (+ Teams in prod) from the shared project into the `.env`, and runs Postgres. These shims are copy-paste ready once v2 exists and the `/areteos` Infisical folder is restructured. `# REPLACE` marks values to confirm before flipping.
+areteos is the case that exercises everything: it pulls SES (+ Teams in prod) from the shared project into the `.env`, and runs Postgres. Use these as the reference shape for a multi-folder Postgres app.
 
 **`deploy-dev.yml`** (loads `/areteos` + shared `/ses`; clones allowed):
 
@@ -315,13 +315,16 @@ Notes specific to areteos:
 
 ## Rollback
 
-v2 deploy is currently deploy-from-scratch only. If a deploy produces a broken `.env`:
+Two ways back, both shims over shared workflows:
 
-1. SSH to the VPS.
-2. Restore the previous `.env` from the backup (`cp /srv/myapp/.env.bak /srv/myapp/.env`).
-3. Re-run `docker compose --env-file .env -f docker-compose.prod.yml up -d`.
+- **Redeploy an older tag** with [`rollback-vps-shared.yml`](../../.github/workflows/rollback-vps-shared.yml)
+  (`version: v1.2.3`). It re-renders `.env` from Infisical and runs the same compose up
+  and healthcheck as a deploy.
+- **Also restore the database** with `restore-db-snapshot: true`, `confirm: RESTORE-DB`
+  and the same `db-*` inputs as the deploy. It restores the newest `pre-deploy-*`
+  snapshot the deploy took, and loses everything written since.
 
-A `rollback-prod` workflow covering this path is a planned fast-follow to v2. See Lumist-Labs/github-actions for tracking.
+Both run the prod-deployer check for `prod`/`production` environments.
 
 ---
 

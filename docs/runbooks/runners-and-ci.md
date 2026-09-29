@@ -17,8 +17,15 @@ The release path is hosted on purpose. It is how a fix reaches production, and
 the self-hosted box is unreachable exactly when you most need to ship. Those
 jobs run in seconds, so the minutes were never worth the coupling.
 
-The last row is real: `arilearn-phx`'s `deploy-dev.yml` stays hosted because it
-calls `tailscale/github-action@v3`, and the runner is already a tailnet node.
+The last row covers tooling that assumes a clean host. Calling
+`tailscale/github-action` directly on a runner that is already a tailnet node is the
+known case; `tailscale-connect` detects an existing node and skips the join.
+
+This repo is the exception to the table: it is public, the org runner group disallows
+public repos, so every job here runs on `ubuntu-latest`.
+
+Every self-hosted runner carries `omarchy`. Only `kenya-lumist-labs-{1,2,3}` carry
+`kenya`, so `runner: kenya` pins a job to those hosts.
 
 **Consumers choose with the `runner:` input** on any shared workflow. It defaults
 to `ubuntu-latest`, so a repo that passes nothing is hosted. That input is also
@@ -38,13 +45,20 @@ starting a fresh Claude call to regenerate the same summary) and
 mess. `release-shared` (stages a commit, pushes main, waits on CI, then tags —
 killed partway leaves a staged commit and no tag), `deploy-vps-shared`
 (half-applied compose state), `copy-prod-db-shared` (two overlapping copies leave
-a dev DB matching neither snapshot), `rollback-vps-shared` (run when something is
-already wrong).
+a dev DB matching neither snapshot), `claude-issue-autopilot` (a cancel between
+push and PR create leaves an orphan branch).
+
+The three VPS workflows also share a job-level group keyed on the target,
+`vps-<caller repo>-<vps-user>-<repo-dir>`, because they all check out, recreate or
+restart containers in the same directory. Deploy and copy-db queue on it. `rollback-vps-shared` sets
+`cancel-in-progress: true` on that group (its workflow-level group stays `false`): a
+rollback pre-empts a running deploy rather than waiting behind it.
+`deploy-concurrency-group` overrides the key; it must match across all three.
 
 ## actionlint
 
-`lint-workflows.yml` runs on every PR touching `.github/workflows/**` or
-`actions/**`. It exists because a mistake here ships to every repo pinned `@v2`
+`lint-workflows.yml` runs on every PR touching `.github/workflows/**`,
+`actions/**` or `scripts/**`. It exists because a mistake here ships to every repo pinned `@v2`
 at once, and reusable workflows get no other validation.
 
 It runs the upstream pinned binary, not a wrapper action:
@@ -83,7 +97,7 @@ called `npm install -g` with no `actions/setup-node` step, relying on
 `ubuntu-latest` having it preinstalled. Add setup-node.
 
 **`actions/setup-python` 404s** — "version not found for this operating system".
-No manifest entry for Arch. Use `ghcr.io/aretecp/ci-python-uv:3.12` instead.
+No manifest entry for Arch. Use `ghcr.io/lumist-labs/ci-python-uv:3.12` instead.
 
 **Root-run container jobs leave uid-0 files** in the shared per-repo `_work`
 workspace, and the next job's `git clean -ffdx` needs write on the parent to
@@ -116,9 +130,9 @@ git config --global --add safe.directory "$GITHUB_WORKSPACE"
 - `paths-ignore` for documentation. **Name the paths; do not use `**/*.md`** —
   markdown under `src/` is often a code input (lumios ships `SKILL.md` library
   seeds and a `rubric.md` that drives behaviour). `*.md` matches root only.
-- Do not put `paths-ignore` on a `push` to a release branch: `release.yml`
-  consumes a CI `workflow_run` for the exact SHA, so skipping CI strands the
-  release gate.
+- Do not put `paths-ignore` on a `push` to a release branch: a consumer's
+  `release.yml` shim over `release-shared.yml` with `ci-gated: true` consumes a CI
+  `workflow_run` for the exact SHA, so skipping CI strands the release gate.
 - Before adding a path filter, check whether the check is **required** in branch
   protection. A required check that never reports leaves PRs pending forever; the
   alternative is an always-running `changes` gate job with the heavy jobs
@@ -130,9 +144,6 @@ git config --global --add safe.directory "$GITHUB_WORKSPACE"
 2. Does it need node, python or npm? Provision explicitly; assume nothing.
 3. Is it on the path that ships to production? Then leave it hosted.
 4. Run `actionlint` locally.
-5. After merging here, **move the `v2` tag** — consumers pin it, so a merge alone
-   changes nothing:
-
-```sh
-git fetch origin && git tag -f v2 origin/main && git push -f origin v2
-```
+5. Title the PR `feat:` or `fix:`. Consumers pin `v2`, and only those prefixes make
+   `release.yml` move it. A `chore:` merge sits unreleased until the next `feat:`
+   ships it unannounced. Do not move `v2` by hand (see [`RELEASING.md`](../../RELEASING.md)).

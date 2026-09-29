@@ -1,6 +1,7 @@
 # CI base images
 
-Prebuilt container images for `aretecp` CI jobs, published to GHCR by
+Prebuilt container images for Lumist-Labs and aretecp CI jobs, published to
+`ghcr.io/lumist-labs/` by
 [`ci-images.yml`](../.github/workflows/ci-images.yml).
 
 ## Why
@@ -22,21 +23,27 @@ that runs only when a `Dockerfile` changes or on the weekly refresh.
 
 ## Available images
 
-| Image | Base | Adds | Consumers |
-|---|---|---|---|
-| `ghcr.io/aretecp/ci-elixir:1.18.4-otp-27` | `elixir:1.18.4-otp-27-slim` | git, build-essential, curl, unzip, python3(-venv), Hex + Rebar, uv + managed CPython 3.12 | `areteos` `ci.yml` |
-| `ghcr.io/aretecp/ci-elixir:1.19.5-otp-28` | `elixir:1.19.5-otp-28-slim` | git, build-essential, curl, Hex + Rebar | `arilearn-phx` `ci.yml` |
-| `ghcr.io/aretecp/ci-python-uv:3.12` | `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` | git, build-essential, libpq5, chromium | `areteos-py` `ci.yml` (backend) |
-| `ghcr.io/aretecp/ci-python:3.12` | `python:3.12-slim` | git, curl, uv | `beacon` `ci.yml` |
-| `ghcr.io/aretecp/ci-node:22` | `node:22-slim` | git, ca-certificates | `areteos-py` `ci.yml` (frontend) |
-| `ghcr.io/aretecp/ci-rust-tauri:1.97` | `rust:1.97-slim-bookworm` | git, pkg-config, build-essential, WebKitGTK 4.1 / GTK 3 / libsoup 3 / JSC 4.1 / OpenSSL / Ayatana app-indicator dev packages, clippy, rustfmt | `areteos` `desktop-ci.yml` |
+| Image | Base | Adds |
+|---|---|---|
+| `ghcr.io/lumist-labs/ci-elixir:1.18.4-otp-27` | `elixir:1.18.4-otp-27-slim` | git, build-essential, curl, unzip, python3(-venv), Hex + Rebar, uv + managed CPython 3.12 |
+| `ghcr.io/lumist-labs/ci-elixir:1.19.5-otp-28` | `elixir:1.19.5-otp-28-slim` | git, build-essential, curl, Hex + Rebar |
+| `ghcr.io/lumist-labs/ci-python-uv:3.12` | `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` | git, build-essential, libpq5, chromium |
+| `ghcr.io/lumist-labs/ci-python:3.12` | `python:3.12-slim` | git, curl, uv |
+| `ghcr.io/lumist-labs/ci-node:22` | `node:22-slim` | git, ca-certificates |
+| `ghcr.io/lumist-labs/ci-rust-tauri:1.97` | `rust:1.97-slim-bookworm` | git, pkg-config, build-essential, WebKitGTK 4.1 / GTK 3 / libsoup 3 / JSC 4.1 / OpenSSL / Ayatana app-indicator dev packages, clippy, rustfmt |
+| `ghcr.io/lumist-labs/ci-autopilot-python:3.12` | `ci-python-uv:3.12` | node 22 + npm (for Claude Code), libstdc++ |
+| `ghcr.io/lumist-labs/ci-autopilot-elixir:1.19.5-otp-28` | `ci-elixir:1.19.5-otp-28` | node 22 + npm (for Claude Code), libstdc++ |
+
+Consumers are recorded per image in [`manifest.json`](manifest.json) (`consumers`). The
+Autopilot images are the `container-image` Beacon passes to
+`claude-issue-autopilot.yml`.
 
 Usage is a one-line swap in the consuming workflow, and the `Install OS
 prereqs` step is deleted:
 
 ```yaml
 container:
-  image: ghcr.io/aretecp/ci-elixir:1.18.4-otp-27
+  image: ghcr.io/lumist-labs/ci-elixir:1.18.4-otp-27
 ```
 
 The packages are public, so no `container.credentials` block is needed.
@@ -62,14 +69,15 @@ Each image gets two:
 - `<tag>-<yyyymmdd>-<sha7>` — immutable. For bisecting a bad refresh or
   pinning strictly.
 
-This mirrors the repo's `@v1` convention: the moving tag names the contract,
+This mirrors the repo's `@v2` convention: the moving tag names the contract,
 not the build.
 
 ## Adding or changing an image
 
 1. Add `images/<dir>/Dockerfile`.
 2. Add `images/<dir>/smoke.sh` — assert *every* tool the consuming workflow
-   stopped installing. This runs on each build; a missing package is a red PR
+   stopped installing. A missing file runs as an empty script and passes, which is
+   the state of both `autopilot-*` images today. This runs on each build; a missing package is a red PR
    check instead of six repos failing their next run.
 3. Add an entry to [`manifest.json`](manifest.json) (`dir`, `image`, `tag`,
    `consumers`). The build matrix reads it — no workflow edit needed.
@@ -82,7 +90,8 @@ must always be Elixir 1.18.4 on OTP 27.
 
 ## `force-unsafe-io`
 
-Every Dockerfile starts by disabling `dpkg`'s per-file fsync:
+Every base Dockerfile starts by disabling `dpkg`'s per-file fsync (the `autopilot-*`
+images inherit it from their base but add an `apt-get` layer without it):
 
 ```dockerfile
 RUN echo 'force-unsafe-io' > /etc/dpkg/dpkg.cfg.d/02speedup

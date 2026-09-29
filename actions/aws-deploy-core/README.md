@@ -70,6 +70,7 @@ in the path.
       target: ec2-compose
       aws-role-arn: ${{ vars.LUMIOS_DEPLOY_ROLE_ARN }}
       instance-id: ${{ vars.LUMIOS_INSTANCE_ID }}
+      image: ${{ steps.image.outputs.image }}   # from ecr-build-push
       repo-dir: /opt/lumios
       ref: ${{ github.sha }}
       env-parameter-name: /lumios/prod/dotenv
