@@ -11,7 +11,7 @@ not a notification.
 
 ```yaml
 - name: Load Teams webhook
-  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
   with:
     method: oidc
     identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -20,7 +20,7 @@ not a notification.
     path: /teams/pr-notify
 
 - name: Notify Teams
-  uses: Lumist-Labs/github-actions/actions/teams-notify@v1
+  uses: Lumist-Labs/github-actions/actions/teams-notify@v2
   env:
     TEAMS_WEBHOOK_URL: ${{ env.TEAMS_PR_NOTIFY_WEBHOOK_URL }}
   with:

@@ -1,42 +1,43 @@
-# Areté Capital Partners — Shared GitHub Actions
+# Lumist-Labs shared GitHub Actions
 
-Reusable composite actions and workflows for `Lumist-Labs` repos (and the `aretecp` repos that still call them). Drop-in `uses:` references with org defaults baked in — no copy-pasted workflow steps across repos.
+Reusable workflows and composite actions for `Lumist-Labs` repos, and the `aretecp` repos
+that still call them. Consumers pin `@v2`. Working in this repo: start at
+[`CLAUDE.md`](CLAUDE.md).
 
-## Available composite actions
+## Composite actions
 
-| Action | Description | Status |
-|---|---|---|
-| [`load-infisical-secrets`](actions/load-infisical-secrets) | Load secrets from Infisical at workflow runtime. Supports env export, JSON output, and bare dotenv file render (v2). | `v2` (`@v1` frozen) |
-| [`tailscale-connect`](actions/tailscale-connect) | Join the Areté Tailscale tailnet. Wraps `tailscale/github-action` with a pinned SHA and corrected input names. | `v1` |
-| [`aws-deploy-core`](actions/aws-deploy-core) | Assume an AWS role via OIDC, resolve resource names from SSM, deploy, and wait for it to be live. Strategy by `target` input; `s3-cloudfront` shipped. Does not build. | `_in development_` |
-| [`teams-notify`](actions/teams-notify) | Post a MessageCard to a Teams incoming webhook. Semantic `status` colours, optional facts block and button, `dry-run` mode. Webhook passed via `env:`, not an input. | `v1` |
-| [`wait-for-healthy`](actions/wait-for-healthy) | Poll `docker inspect` over SSH until every named container is `healthy`, dumping compose logs on timeout. Ships `scripts/wait-for-healthy.sh` to the host instead of having the host `curl` it. | `v2` |
+| Action | What it does |
+|---|---|
+| [`load-infisical-secrets`](actions/load-infisical-secrets) | Load secrets from Infisical at runtime: env export, JSON output, or a bare dotenv file. OIDC or Universal Auth. |
+| [`tailscale-connect`](actions/tailscale-connect) | Join the tailnet. Wraps `tailscale/github-action` at a pinned SHA; skips the join on a runner that is already a node. |
+| [`vps-deploy-core`](actions/vps-deploy-core) | The VPS deploy engine behind the three VPS workflows: render `.env`, SSH, checkout, optional DB snapshot, compose up, healthcheck. |
+| [`wait-for-healthy`](actions/wait-for-healthy) | Poll `docker inspect` over SSH until every named container is `healthy`, dumping compose logs on timeout. Ships the script over SSH. |
+| [`assert-prod-deployer`](actions/assert-prod-deployer) | Fail unless the triggering actor is in the `PROD_DEPLOYERS` org variable. First step of every prod deploy, rollback and DB copy. |
+| [`aws-deploy-core`](actions/aws-deploy-core) | Assume an AWS role via OIDC, resolve names from SSM, deploy, wait until live. Targets `s3-cloudfront`, `ec2-compose`, `ecs-service`. Does not build. |
+| [`ecr-build-push`](actions/ecr-build-push) | Build and push an image to ECR tagged by SHA and version; retag instead of rebuilding when the SHA already exists. |
+| [`teams-notify`](actions/teams-notify) | Post a MessageCard to a Teams webhook. `status` colours, facts, a button, `dry-run`. Webhook comes via `env:`. |
 
-More to come — Elixir/OTP setup, uv/Python setup. Each ships as its own composite action under `actions/<name>/`.
+## Reusable workflows
 
-> **`@v1` is frozen.** All existing consumers that pin `load-infisical-secrets@v1` are unaffected. The v2 `dotenv` render mode is additive — migrate one repo at a time via the [VPS deploy migration runbook](docs/runbooks/deploy-vps-migration.md).
+Called as `jobs.<name>.uses: Lumist-Labs/github-actions/.github/workflows/<file>@v2`. Each
+file's `inputs:` block and header comment are the contract.
 
-## Available reusable workflows
-
-| Workflow | Description | Status |
-|---|---|---|
-| [`release-shared.yml`](.github/workflows/release-shared.yml) | Squash-merge → conventional-commit promotion → semantic-release → optional deploy trigger. `ci-gated: true` releases only a CI-passed SHA. | `v2` |
-| [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render Infisical folder → dotenv → write to VPS over ssh → docker compose up → healthcheck. Callers become ~15-line shims. | `v2` |
-| [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Auto-triage of new issues / `@claude` comments via Claude Code. Bundled system prompt at `.claude/prompts/ci-triage.md`. Callers pass **no inputs at all** — see [zero-config shim](#zero-config-consumer-shim). | `v2` |
-| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. On PRs into `main`: Claude summary → PR body + Closes #N → request `core` review → Teams card. | `v2` |
-| [`claude-issue-autopilot.yml`](.github/workflows/claude-issue-autopilot.yml) | Beacon-dispatched: score one issue in a target repo; if small and nothing protected, implement it and open a **draft** PR, otherwise offer it to an admin or hand it to a human. Needs a GitHub App — see [`docs/runbooks/issue-autopilot.md`](docs/runbooks/issue-autopilot.md). | `v2` |
-
-Reusable workflows are called via `jobs.<name>.uses: Lumist-Labs/github-actions/.github/workflows/<file>@v1` in the consumer repo. See the workflow file's header comments for inputs and prerequisites.
+| Workflow | What it does |
+|---|---|
+| [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render the app's Infisical folder to `.env`, write it to the VPS, `docker compose up`, healthcheck. Callers are short shims. |
+| [`rollback-vps-shared.yml`](.github/workflows/rollback-vps-shared.yml) | Redeploy a previous tag, optionally restoring the latest pre-deploy DB snapshot (`confirm: RESTORE-DB`). |
+| [`copy-prod-db-shared.yml`](.github/workflows/copy-prod-db-shared.yml) | Copy the prod DB over dev on the same VPS. Prod is read-only; needs `confirm: CLOBBER-DEV`. |
+| [`release-shared.yml`](.github/workflows/release-shared.yml) | semantic-release on `main`, then dispatch the caller's deploy workflow. `ci-gated: true` tags only a CI-passed SHA. |
+| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. PRs into `main`/`master`: Claude summary into the body, `Closes #N`, request `core` review, Teams card. |
+| [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Triage new issues and `@claude` comments with Claude Code. Callers pass no inputs; see [zero-config shim](#zero-config-consumer-shim). |
+| [`claude-issue-autopilot.yml`](.github/workflows/claude-issue-autopilot.yml) | Beacon-dispatched: score one issue and, if it passes the gate, implement it as a draft PR. See [`docs/runbooks/issue-autopilot.md`](docs/runbooks/issue-autopilot.md). |
 
 ### Scheduled workflows (run here, not called)
 
-| Workflow | Description | Schedule |
+| Workflow | What it does | Schedule (UTC) |
 |---|---|---|
-| [`entra-secret-detector.yml`](.github/workflows/entra-secret-detector.yml) | Read-only Graph scan of every Entra app registration. Reports credentials nearing expiry and flags ones Terraform doesn't manage. Silent when nothing is in window. | `17 13 * * *` |
-| [`ci-images.yml`](.github/workflows/ci-images.yml) | Build + publish the CI base images in [`images/`](images) to GHCR. Also runs on change to `images/**`. | `17 4 * * 0` |
-
-Not `workflow_call` targets — these run in this repo on a cron. See
-[`docs/runbooks/entra-secret-detector.md`](docs/runbooks/entra-secret-detector.md).
+| [`entra-secret-detector.yml`](.github/workflows/entra-secret-detector.yml) | Read-only Graph scan of every Entra app registration; reports credentials nearing expiry. Silent when nothing is in window. See [runbook](docs/runbooks/entra-secret-detector.md). | `0 13 * * *` |
+| [`ci-images.yml`](.github/workflows/ci-images.yml) | Rebuild and publish the CI base images in [`images/`](images). Also runs on change to `images/**`. | `17 4 * * 0` |
 
 ### Zero-config consumer shim
 
@@ -82,10 +83,11 @@ are core-only) apply the moment the repo exists — nothing to do for those.
 1. **Branches.** Create `develop` off `main` and make it the default. Work goes
    feature → `develop` → `main`; `main` is production.
 2. **Repo variables.** `INFISICAL_INTERNAL_PROJECT_SLUG`,
-   `INFISICAL_SHARED_PROJECT_SLUG`, and `VPS_USER` if it deploys to the VPS.
-   `INFISICAL_OIDC_IDENTITY_ID`, `PROD_DEPLOYERS` and `RELEASE_BOT_APP_ID` are org
-   variables scoped to every repo — check with `gh variable list --repo <repo>`,
-   which shows inherited ones, before assuming.
+   `INFISICAL_SHARED_PROJECT_SLUG`, and `VPS_USER` if it deploys to the VPS. The org-level
+   copies of these are visible only to lumist-frontend-templates, passage and vector, so
+   every other repo sets its own. `INFISICAL_OIDC_IDENTITY_ID`, `PROD_DEPLOYERS` and
+   `RELEASE_BOT_APP_ID` are org variables visible to every repo. Check with
+   `gh variable list --repo <repo>`, which shows inherited ones, before assuming.
 3. **Infisical folder.** `/<app>` in `lumist-labs-internal`, one set of values per
    environment. Everything the app reads at runtime lives here — the deploy renders
    `.env` from it, so a value hardcoded in a workflow is a value that will drift.
@@ -95,9 +97,11 @@ are core-only) apply the moment the repo exists — nothing to do for those.
    `lumist-release-bot`, which is what gets them past the `main` ruleset.
 5. **Deploy.** A shim over [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml).
    An app that deploys itself (blue/green, say) passes `deploy-command`; work that
-   needs the new version running goes in `post-deploy-command`. AWS deploys are
-   per-app today — copy lumios or vector, and add the
-   [`assert-prod-deployer`](actions/assert-prod-deployer) step yourself.
+   needs the new version running goes in `post-deploy-command`. AWS deploys have no
+   shared workflow yet: lumios and vector compose
+   [`ecr-build-push`](actions/ecr-build-push) and [`aws-deploy-core`](actions/aws-deploy-core)
+   in their own workflow. Copy one, and keep its
+   [`assert-prod-deployer`](actions/assert-prod-deployer) step.
 6. **PR hooks.** A shim over [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml),
    triggered on PRs into `develop` and `main`.
 7. **Production environment.** If it deploys to prod, add the repo to
@@ -114,12 +118,14 @@ byte-identical packages on every run and, on a runner host with slow fsync, reac
 
 | Image | For |
 |---|---|
-| `ghcr.io/aretecp/ci-elixir:1.18.4-otp-27` | Elixir 1.18 / OTP 27 apps (`areteos`) |
-| `ghcr.io/aretecp/ci-elixir:1.19.5-otp-28` | Elixir 1.19 / OTP 28 apps (`arilearn-phx`) |
-| `ghcr.io/aretecp/ci-python-uv:3.12` | uv-managed Python backends, incl. chromium (`areteos-py`) |
-| `ghcr.io/aretecp/ci-python:3.12` | Python backends that drive uv themselves (`beacon`) |
-| `ghcr.io/aretecp/ci-node:22` | Node 22 frontends (`areteos-py`) |
-| `ghcr.io/aretecp/ci-rust-tauri:1.97` | Tauri desktop workspace (`areteos/desktop`) |
+| `ghcr.io/lumist-labs/ci-elixir:1.18.4-otp-27` | Elixir 1.18 / OTP 27 |
+| `ghcr.io/lumist-labs/ci-elixir:1.19.5-otp-28` | Elixir 1.19 / OTP 28 |
+| `ghcr.io/lumist-labs/ci-python-uv:3.12` | uv-managed Python backends, incl. chromium |
+| `ghcr.io/lumist-labs/ci-python:3.12` | Python backends that drive uv themselves |
+| `ghcr.io/lumist-labs/ci-node:22` | Node 22 frontends; the default Autopilot image |
+| `ghcr.io/lumist-labs/ci-rust-tauri:1.97` | Tauri desktop workspace |
+| `ghcr.io/lumist-labs/ci-autopilot-python:3.12` | Autopilot jobs on Python repos |
+| `ghcr.io/lumist-labs/ci-autopilot-elixir:1.19.5-otp-28` | Autopilot jobs on Elixir repos |
 
 Public packages, so no `container.credentials` block is needed. Rebuilt on change and weekly for
 OS security patches. See [`images/README.md`](images/README.md) for contents, tag policy, and
@@ -127,23 +133,26 @@ what must never be baked in.
 
 ## Usage
 
-Pin to the moving major tag for non-breaking updates:
+Pin the moving major tag:
 
 ```yaml
-- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
-  with:
-    project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
-    environment: prod
-    client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-    client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+permissions:
+  contents: read
+  id-token: write   # OIDC
+steps:
+  - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
+    with:
+      method: oidc
+      identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
+      project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
+      environment: prod
+      path: /<app>
 ```
 
-> Each consuming workflow needs access to the `INFISICAL_CLIENT_ID` / `INFISICAL_CLIENT_SECRET` org secrets and the `INFISICAL_*_PROJECT_SLUG` org variables. See the action's [`README`](actions/load-infisical-secrets/README.md#prerequisites) for full prerequisites.
-
-Or pin to a specific version / SHA for stricter reproducibility:
+Or an exact version or SHA for stricter reproducibility:
 
 ```yaml
-- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1.0.0
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2.44.1
 - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@<full-commit-sha>
 ```
 
@@ -159,19 +168,23 @@ workflow defaults to hosted and is the fail-back when the self-hosted box is dow
 
 ## Versioning
 
-- `@v1` — moving major tag; tracks the latest `1.x.y`. Recommended for most consumers.
-- `@v1.2.3` — exact version; pin if you need reproducibility but can tolerate manual upgrades.
-- `@<sha>` — strictest. Pin if your security posture requires it.
+- `@v2` — moving major tag; tracks the latest `2.x.y`. What every consumer should pin.
+- `@v2.x.y` — exact version.
+- `@<sha>` — strictest.
+- `@v1` — frozen. It predates most of this repo; nothing new ships on it.
 
-Breaking changes bump the major. The `v1` tag stays on `1.x` forever.
+`release.yml` cuts the version and moves `v2` on each `feat:`/`fix:` merge. See
+[`RELEASING.md`](RELEASING.md).
 
 ## Shared scripts ([`scripts/`](scripts))
 
-Runtime utilities consumer workflows fetch via curl + run inside their existing SSH scripts on the deploy target. The GH runner can't reach the VPS's Docker daemon, so these execute on the VPS at deploy time. See [`scripts/README.md`](scripts/README.md).
+Scripts the workflows and actions here run: the healthcheck shipped to the VPS over SSH by
+`wait-for-healthy`, the Autopilot guardrail, the Entra scan, and the VPS Docker janitor. See
+[`scripts/README.md`](scripts/README.md).
 
 ## Admin tools ([`tools/`](tools))
 
-Maintainer scripts for org-wide GH config — secret syncing, post-migration cleanup. Run locally with `gh` CLI auth, never fetched from a workflow. See [`tools/README.md`](tools/README.md).
+Maintainer scripts for org-wide GitHub config: project setup, secret syncing, stale-blocker scans, post-migration cleanup. Run locally with `gh` CLI auth, never fetched from a workflow. See [`tools/README.md`](tools/README.md).
 
 ## Releasing
 

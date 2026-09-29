@@ -9,19 +9,22 @@ This repo uses **single-repo versioning**. One annotated `vX.Y.Z` tag per releas
 Consumers pin per-action via path:
 
 ```yaml
-- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
-- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1.0.0
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2.44.1
 - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@<full-sha>
 ```
 
-When a second action ships, both share the same `v1`/`v2` cadence. If divergent release cycles become painful, switch to per-action tags (`load-infisical-secrets/v1`) — that's a future migration, not how this repo starts.
+Reusable workflows and composites share that one tag. They also reference each other at
+`@v2`, so moving the tag ships every changed file at once. `v1` is frozen.
 
 ## Pre-release checklist
 
 - [ ] All open PRs targeting this release are merged.
-- [ ] **Validation gate.** Currently: a real consumer (the pilot in #6, or another live workflow) has exercised every changed action against a real Infisical project since the last release. Re-enable a workflow-based smoke gate by reopening #4 if/when that becomes worth the public-repo logging tradeoff.
+- [ ] **Validation gate.** CI here only lints and runs the script tests. A changed reusable
+      workflow or composite is exercised only by a consumer run, so point one consumer's
+      `uses:` at the branch, run it, and revert that pin before merging.
 - [ ] Action READMEs reflect the inputs/outputs as of the current `main`.
-- [ ] Root README's "Available actions" table reflects the new version (status column shows `v1.0.0`, not `_in development_`).
+- [ ] Root README's action and workflow tables list anything new.
 - [ ] `CONTRIBUTING.md` is up to date if any conventions changed.
 
 ## Picking the version
@@ -83,40 +86,33 @@ The workflow:
 6. Creates a GitHub Release with auto-generated notes (pre-releases marked as such)
 7. Posts a step-summary with links
 
-### Manual fallback
+### No manual fallback
 
-If the workflow is broken or unavailable, the manual procedure is:
+`v*` tags are covered by the org `release-tags` ruleset. Only the `lumist-release-bot` App
+(which `release.yml` pushes as) and the `core` team can create, move or delete them. Don't
+push them by hand even with that access: a hand-moved `v2` skips the version checks and
+the GitHub Release. If the workflow is broken, fix `release.yml` and re-run it with an
+explicit `version`.
 
-```bash
-VERSION=v1.0.1   # the version you're cutting
-MAJOR=v1         # major component
+### Moving major tag
 
-git checkout main && git pull origin main
-git tag -a "$VERSION" -m "$VERSION" && git push origin "$VERSION"
-git tag -fa "$MAJOR" -m "Tracking $MAJOR.x" && git push --force origin "$MAJOR"
-gh release create "$VERSION" --title "$VERSION" --generate-notes
-```
-
-The `--force` on `$MAJOR` is intentional — see the warning under "Moving major tag" below.
-
-### Moving major tag — the one legitimate force-push
-
-The `vX` moving tag is the **only** force operation in this repo. Every patch and minor under the same major requires advancing `vX` to the new annotated tag. The release workflow handles this automatically; the manual fallback does it explicitly. Future contributors should not interpret it as a mistake or push for `--no-force` policies on tags.
+`release.yml` force-moves `v2` on every stable release. That is the only force operation in
+this repo, and it is intentional.
 
 ## Post-release
 
-- [ ] Verify `v1` resolves to the same commit as the new annotated tag:
+- [ ] Verify `v2` resolves to the same commit as the new annotated tag:
   ```bash
-  git ls-remote --tags origin | grep -E '/v1(\.|$)' | sort
+  git ls-remote --tags origin | grep -E '/v2(\.|$)' | sort
   ```
   Both should point at the same SHA.
-- [ ] Bump consumer repos that pin to a SHA (the pilot in #6, etc.) if they want the new version. Repos pinned to `@v1` get the upgrade automatically on their next workflow run.
-- [ ] Close any "released in $VERSION" labeled issues / project-board cards.
+- [ ] Repos pinned to `@v2` get the release on their next run. Repos on an exact version
+      (bd-pulse, contact-intelligence and performance-review pin `@v2.20.2`) do not.
 
 ## If something is wrong after release
 
-- **Bug found in `vX.Y.Z`** → cut `vX.Y.Z+1` with the fix, then re-force `vX` to the new tag. Old patch stays where it is; consumers on `@v1` get the fix automatically.
-- **Tag pushed by mistake to a non-stable commit** → cut a `vX.Y.Z+1` from the *correct* commit, re-force `vX`. The bad tag stays in history but is no longer pointed at by `vX`.
-- **Major regression that needs immediate revert** → revert the offending commit on `main`, cut a new patch, force `vX` to the new patch. Don't try to rewrite history of `main` to "remove" the bad release.
+- **Bug found in `vX.Y.Z`** → merge the fix as `fix:`. `release.yml` cuts `vX.Y.Z+1` and moves `v2`. The bad version stays; `@v2` consumers get the fix on their next run.
+- **Regression that needs an immediate revert** → merge the revert with a `fix:` title (a `revert:` or `chore:` title does not release). Don't rewrite `main` history.
+- **A `chore:` merge broke something that is not yet live** → it ships with the next `feat:`/`fix:`. Fix or revert it before anything else merges.
 
 The rule of thumb: **only the moving `vX` tag changes after a push. Everything else is append-only.**

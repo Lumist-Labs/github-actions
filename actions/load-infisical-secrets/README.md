@@ -26,6 +26,9 @@ The consumer repo's workflow needs configuration depending on which auth method 
 
 Project slugs are stable, public identifiers — store as variables, not secrets, for one source of truth.
 
+These exist at Lumist-Labs org level but are visible only to lumist-frontend-templates,
+passage and vector. Every other repo sets them as repo variables.
+
 | Variable | Value | Use in workflows |
 |---|---|---|
 | `INFISICAL_INTERNAL_PROJECT_SLUG` | `lumist-labs-internal` | `${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}` |
@@ -34,9 +37,9 @@ Project slugs are stable, public identifiers — store as variables, not secrets
 
 Workflows can also pass the slug as a literal (`project-slug: lumist-labs-internal`) — variables are an ergonomic convention, not a requirement.
 
-### Already set in `aretecp` org
+### Already set in the `Lumist-Labs` org
 
-The following secrets exist in the org but **are not consumed by this action** (this action needs the *slug*, not the UUID). They're useful for direct Infisical API calls or other tooling:
+The following org secrets (visibility: private repos) **are not consumed by this action** (this action needs the *slug*, not the UUID). They're useful for direct Infisical API calls or other tooling:
 
 - `INFISICAL_INTERNAL_PROJECT_ID`
 - `INFISICAL_EXTERNAL_PROJECT_ID`
@@ -55,7 +58,7 @@ jobs:
       contents: read
       id-token: write   # ← required for OIDC token issuance
     steps:
-      - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+      - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
         with:
           method: oidc
           identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -71,7 +74,7 @@ No stored Infisical credentials. The `identity-id` is a non-sensitive UUID; safe
 ### Universal Auth mode (legacy)
 
 ```yaml
-- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+- uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
   with:
     project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
     environment: prod
@@ -109,7 +112,7 @@ If `lumist-labs-shared` is loaded **recursively** at `/`, its subfolders may con
 steps:
   # 1. Shared first — applies org-wide defaults and cross-cutting infra
   - name: Load shared infra secrets from Infisical (OIDC)
-    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
     with:
       method: oidc
       identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -120,7 +123,7 @@ steps:
 
   # 2. Project-specific second — overrides any collisions from shared
   - name: Load app secrets from Infisical (OIDC)
-    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+    uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
     with:
       method: oidc
       identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
@@ -137,7 +140,7 @@ If you only need keys at the **root** of the shared project (i.e. you don't need
 
 ```yaml
 - id: load
-  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+  uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
   with:
     project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
     environment: prod
@@ -209,7 +212,7 @@ Note: see [Limitations](#limitations) — multi-line secrets (PEM keys) are not 
 
 - **Multi-line secret values** (PEM keys, certificates with newlines, etc.) are **not supported** when `export-as-env: 'false'` or `export-as-env: 'dotenv'`. The `.env` parser is single-line. Use env mode for multi-line values, or open an issue if dotenv/JSON output for multi-line is needed. Before migrating a repo to v2 deploy mode, verify that no app-folder secrets span multiple lines.
 - **`docker compose --env-file` treats quotes literally** — the dotenv render emits bare `KEY=value` with no quote-wrapping specifically to avoid this. Do not manually add quotes to secrets stored in Infisical if they will be consumed via dotenv mode.
-- **`ubuntu-latest` runners only** — relies on `jq` and `bash` being preinstalled. macOS and Windows runners are untested; file an issue if you need them.
+- **Linux runners with `jq` and `bash`.** `ubuntu-latest` and the self-hosted runners both work. macOS and Windows are untested.
 
 ## Bumping the upstream `Infisical/secrets-action` SHA
 
@@ -226,7 +229,7 @@ This action is pinned to a specific commit SHA of `Infisical/secrets-action` (no
    ```
 3. Update both `uses:` lines in this action's `action.yml` to the new SHA. Update the `# vX.Y.Z` trailing comment.
 4. If the upstream change introduces, removes, or renames any input/output that we expose: bump **major** version of `load-infisical-secrets` per [`CONTRIBUTING.md`](../../CONTRIBUTING.md). Otherwise minor or patch as appropriate.
-5. Open a PR. The smoke test (issue #4 once landed) will exercise the new SHA against a real Infisical project.
+5. Open a PR. There is no smoke test for this action; validate the new SHA with a consumer run before merging (see [`RELEASING.md`](../../RELEASING.md#pre-release-checklist)).
 
 ## Versioning policy
 
@@ -236,6 +239,6 @@ See [`CONTRIBUTING.md`](../../CONTRIBUTING.md#versioning) for the full policy. Q
 |---|---|
 | Internal refactor, no caller-visible change | patch |
 | New optional input or behavior, default unchanged | minor |
-| Renamed/removed input or output, changed default, breaking shape change | **major** (and update the moving `v1` tag policy) |
+| Renamed/removed input or output, changed default, breaking shape change | **major** |
 | Upstream SHA bump with no caller-visible change | patch |
 | Upstream SHA bump that surfaces new behavior to callers | minor or major depending on visibility |

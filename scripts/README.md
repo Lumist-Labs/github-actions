@@ -1,6 +1,7 @@
 # `scripts/`
 
-**Runtime-shared bash utilities** executed on the deploy target (VPS).
+Scripts the workflows and actions in this repo run, on the deploy target (VPS) or on the
+GitHub runner.
 
 A `curl` from inside the remote SSH script was the original mechanism, and
 still is for the two `docker-prune` scripts an operator runs by hand. No
@@ -20,11 +21,12 @@ For admin / local-execution scripts run by a maintainer, see [`../tools/`](../to
 | [`docker-prune.sh`](docker-prune.sh) | Reclaim Docker disk (dangling images, aged build cache), then exit non-zero if usage or free space breaches a threshold | VPS |
 | [`install-docker-prune.sh`](install-docker-prune.sh) | Install `docker-prune.sh` on a VPS and schedule it — systemd timer where sudo allows, user crontab otherwise | VPS |
 | [`entra-credential-scan.sh`](entra-credential-scan.sh) | Enumerate every Entra app registration and report each credential's expiry as JSON, soonest-first. Read-only Graph query. | Runner |
-| [`autopilot-verdict.js`](autopilot-verdict.js) | Parse the autopilot scoring model's JSON and decide, independently of it, whether an issue may be implemented unsupervised. The guardrail, not a helper — see [`docs/runbooks/issue-autopilot.md`](../docs/runbooks/issue-autopilot.md) | Runner |
+| [`autopilot-verdict.js`](autopilot-verdict.js) | Parse the autopilot scoring model's JSON and decide, independently of it, whether an issue may be implemented unsupervised. The guardrail, not a helper — see [`docs/runbooks/issue-autopilot.md`](../docs/runbooks/issue-autopilot.md). Tests: `autopilot-verdict.test.js` | Runner |
+| [`autopilot-attachments.js`](autopilot-attachments.js) | Download the screenshots linked in an issue body, only from Beacon's signed attachment URLs, so the Autopilot passes can read them | Runner |
+| [`autopilot-paths-audit.js`](autopilot-paths-audit.js) | Print which files in a repo's tree each `blocked-paths` / `sensitive-paths` group matches, for reviewing a pattern change as a file list. Run by hand. Tests: `autopilot-paths-audit.test.js` | Maintainer |
 
-> **Note:** `entra-credential-scan.sh` and `autopilot-verdict.js` are the exceptions to
-> the "executed on the deploy target" rule above — they run on the GitHub runner, not a
-> VPS, and are checked out rather than curl'd. They live here rather than in `tools/`
+> **Note:** the Runner rows run on the GitHub runner, not a VPS, and are checked out
+> rather than curl'd (Autopilot checks this repo out at `shared-ref`). They live here rather than in `tools/`
 > because a workflow consumes them, not a maintainer at a terminal. See
 > [`entra-secret-detector.yml`](../.github/workflows/entra-secret-detector.yml) and
 > [`claude-issue-autopilot.yml`](../.github/workflows/claude-issue-autopilot.yml).
@@ -100,13 +102,14 @@ percent alone under-reads the danger on a volume that size.
 
 For the two `docker-prune` scripts. Every pin below hardcodes the org, which is
 why a workflow must not fetch this way — a repo transfer breaks all of them.
+`v1` is frozen and predates these scripts; pin `v2`.
 
 Pick the ref that matches your trust + reproducibility tradeoff:
 
 | Pin | Use when |
 |---|---|
-| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v1/scripts/...` | Default. Get patch fixes automatically. |
-| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v1.2.3/scripts/...` | You want exact reproducibility but can manually upgrade |
+| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v2/scripts/...` | Default. Get fixes automatically. |
+| `https://raw.githubusercontent.com/Lumist-Labs/github-actions/v2.44.1/scripts/...` | You want exact reproducibility but can manually upgrade |
 | `https://raw.githubusercontent.com/Lumist-Labs/github-actions/<full-sha>/scripts/...` | Strict — security-sensitive workflows |
 
 ## Why a script, wrapped in an action

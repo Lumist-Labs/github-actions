@@ -1,20 +1,20 @@
 # Contributing
 
-This repo holds shared **composite GitHub Actions** for `aretecp` repos. Each action lives in its own directory under `actions/` and is consumed by other repos via `uses: Lumist-Labs/github-actions/actions/<name>@<ref>`.
+This repo holds shared composite actions and reusable workflows for `Lumist-Labs` and `aretecp` repos. Consumers call them as `uses: Lumist-Labs/github-actions/actions/<name>@v2` or `.../.github/workflows/<file>@v2`. Repo-wide rules for agents and humans are in [`CLAUDE.md`](CLAUDE.md).
 
 ## Repo layout
 
 ```
 .
-├── actions/
-│   └── <action-name>/
-│       ├── action.yml         # required — composite action definition
-│       └── README.md          # required — usage docs for consumers
-├── .github/
-│   ├── ISSUE_TEMPLATE/
-│   ├── pull_request_template.md
-│   └── workflows/             # smoke-tests for actions in this repo
-└── CONTRIBUTING.md
+├── actions/<name>/
+│   ├── action.yml         # composite action definition
+│   └── README.md          # inputs, outputs, usage
+├── .github/workflows/     # reusable workflows, plus this repo's CI, release and cron jobs
+├── .claude/prompts/       # prompts the Claude workflows check out at run time
+├── scripts/               # scripts workflows and actions run (see scripts/README.md)
+├── tools/                 # maintainer scripts run by hand (see tools/README.md)
+├── images/                # CI base images; manifest.json drives ci-images.yml
+└── docs/                  # architecture, runbooks
 ```
 
 One action per directory. The directory name is the action's public name — pick it carefully.
@@ -22,11 +22,11 @@ One action per directory. The directory name is the action's public name — pic
 ## Adding a new action
 
 1. **Open an issue first** using the `Feature request` template. Describe the problem you're solving across repos and sketch the inputs/outputs. Get a thumbs-up before writing code.
-2. **Branch off `main`** with `feat/<issue#>-<short-name>` (e.g. `feat/12-tailscale-connect`).
+2. **Branch off `main`** (this repo has no `develop`) with `feat/<issue#>-<short-name>` (e.g. `feat/12-tailscale-connect`).
 3. **Create `actions/<name>/action.yml`** following the schema below.
 4. **Write `actions/<name>/README.md`** — show a `uses:` block, document every input and output, list any required secrets/permissions.
-5. **Add a smoke-test workflow** under `.github/workflows/smoke-<name>.yml` that exercises the action on `pull_request` against the changed paths. Until #4 lands as a reusable scaffold, copy the pattern from an existing smoke workflow.
-6. **Open a PR** linking the issue with `Closes #N`. Verify the smoke-test workflow is green on the PR.
+5. **Add a smoke-test workflow** under `.github/workflows/smoke-<name>.yml` if the action can run without real credentials. [`smoke-teams-notify.yml`](.github/workflows/smoke-teams-notify.yml) is the pattern. Actions that need a VPS, AWS or Infisical are validated by a consumer run instead (see [`RELEASING.md`](RELEASING.md#pre-release-checklist)).
+6. **Open a PR** linking the issue with `Closes #N`, titled `feat:` so merging releases it. Verify `lint-workflows.yml` and any smoke test are green.
 
 ## `action.yml` schema
 
@@ -61,7 +61,7 @@ Conventions:
 
 - **Input names** are `kebab-case` (`project-id`, not `projectId` or `project_id`).
 - **Required vs optional** — required inputs have no `default`; optional inputs always have one.
-- **Secrets** are *never* declared as inputs. Pass them through `env:` at the call site so they don't leak into the workflow log on misuse. Document the expected env var names in the action's README.
+- **Secrets** go through `env:` at the call site, not inputs, so they don't leak into the workflow log on misuse (`teams-notify` reads `TEAMS_WEBHOOK_URL` this way). Document the env var names in the action's README. Older exceptions exist: `load-infisical-secrets` takes `client-secret` and `wait-for-healthy` takes `key` as inputs.
 - **Outputs** must come from a step with an explicit `id:`. Don't rely on implicit step IDs.
 - **Idempotency** — composite actions get re-run on `act` and during PR rebases. Don't write to shared state without guards.
 
@@ -101,7 +101,7 @@ When you bump major, the old `vN` tag stays where it is — it does not advance.
 
 ## Smoke tests
 
-Every action needs a smoke-test workflow that runs on PRs touching `actions/<name>/**`. The smoke test should:
+Only `teams-notify` has one today. Where an action can run without real infrastructure, add a smoke-test workflow that runs on PRs touching `actions/<name>/**`. It should:
 
 - Run on the OS(es) the action supports (`ubuntu-latest` at minimum)
 - Exercise the action with realistic inputs
@@ -125,7 +125,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Without the `environment:` line, `${{ secrets.X }}` resolves to empty for any secret stored at the environment level. Repo-level secrets still resolve. **In private repos on GitHub Free orgs, org-level secrets also fail to resolve regardless** — workaround in [`scripts/sync-infisical-config.sh`](scripts/sync-infisical-config.sh) for that case.
+Without the `environment:` line, `${{ secrets.X }}` resolves to empty for any secret stored at the environment level. Repo-level secrets still resolve. **In private repos on GitHub Free orgs, org-level secrets also fail to resolve regardless** — workaround in [`tools/sync-infisical-config.sh`](tools/sync-infisical-config.sh) for that case.
 
 This rule cost us a debugging cycle on the `load-infisical-secrets` pilot and silently broke the `pr-to-main-hooks.yml` workflow in two repos (Claude PR summaries + Teams notifications no-op'd for months). When in doubt, add the `environment:` line.
 
@@ -138,7 +138,7 @@ This rule cost us a debugging cycle on the `load-infisical-secrets` pilot and si
 
 ## Releases
 
-Cutting a release is its own task tracked in #5 (initial process) and any follow-up issues. The short version: tag `vX.Y.Z`, then force-update the moving `vX` tag to point at the new annotated tag. Do not delete or rewrite published versioned tags.
+Merging a `feat:` or `fix:` PR to `main` releases it: `release.yml` tags `vX.Y.Z` and moves `v2`. `chore:`/`docs:`/`refactor:` merges do not release. Procedure and recovery: [`RELEASING.md`](RELEASING.md).
 
 ## Questions
 

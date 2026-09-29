@@ -5,8 +5,8 @@ credential nearing expiry.
 
 **Workflow:** [`.github/workflows/entra-secret-detector.yml`](../../.github/workflows/entra-secret-detector.yml)
 **Scan logic:** [`scripts/entra-credential-scan.sh`](../../scripts/entra-credential-scan.sh)
-**Schedule:** `17 13 * * *` (daily, 13:00 UTC)
-**Design doc:** `docs/features/entra-secret-rotation/PLAN.md` in `aretecp/microsoft-entra-terraform-infrastructure`
+**Schedule:** `0 13 * * *` (daily, 13:00 UTC)
+**Design doc:** `docs/features/entra-secret-rotation/PLAN.md` in `Lumist-Labs/microsoft-entra-terraform-infrastructure`
 
 ## Why this exists
 

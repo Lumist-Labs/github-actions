@@ -1,15 +1,14 @@
 # Issue autopilot
 
 `claude-issue-autopilot.yml` scores one issue in a target repo and, for the ones
-that are genuinely small, opens a **draft** pull request. Nothing merges without
-a person, and nothing is verified before the PR exists — the PR's own CI is the
-first check the change gets.
+that pass the gate, opens a **draft** pull request. Nothing merges without a
+person. The PR's own CI is the full test run the change gets.
 
 Beacon runs it. Its dispatcher, `beacon/.github/workflows/autopilot.yml`, is the
-only caller: Beacon dispatches it with `repo`, `issue` and `mode`, and the
-dispatcher looks up that repo's settings in `beacon/.github/autopilot-repos.json`.
-Target repos carry no autopilot files. Plan and rationale: beacon
-`docs/features/auto-dev-loop/CONNECTING.md`.
+only caller: Beacon dispatches it with `repo`, `issue` and `mode` (plus `evidence`,
+and `pr`/`branch`/`ci_logs` for a fix run), and the dispatcher looks up that repo's
+settings in `beacon/.github/autopilot-repos.json`. Target repos carry no autopilot
+files. Beacon's side of the loop: beacon `docs/features/auto-dev-loop/CONNECTING.md`.
 
 This is a different job from [`claude-issue-triage.yml`](../../.github/workflows/claude-issue-triage.yml).
 Triage is advisory and runs in each repo on every issue; autopilot authorizes an
@@ -21,66 +20,88 @@ unsupervised change and runs only when Beacon asks.
 - `override` — a Beacon admin's Start anyway. It waives size, confidence,
   sensitive paths and the model's own `review`. It never waives blocked paths,
   unparseable output, invalid points or a bad branch.
-- `fix` — Beacon dispatches it when an Autopilot PR's CI fails. It pushes to that
-  PR's branch; at most two per PR.
+- `fix` — Beacon dispatches it when an Autopilot PR's CI fails. It skips `score`,
+  checks out the PR's branch and pushes a fix to it. It fails without `ci-logs`.
+  Beacon caps it at `MAX_FIX_ATTEMPTS` (2) per PR in
+  `backend/app/services/autopilot_ready.py`.
 
 Only Beacon holds a token that can dispatch, so admin rights live in Beacon and
 nowhere else.
 
 ## Adding a repo
 
-- Add it to `beacon/.github/autopilot-repos.json` with its base branch, runner,
-  `blocked-paths` and `sensitive-paths`. Check both against the repo's tree with
-  `node scripts/autopilot-paths-audit.js <autopilot-repos.json> <owner/repo>`.
-- Install `lumist-release-bot` on the repo with contents, pull-requests and
-  issues write. A repo in another org needs that org's own installation.
+- Add it to `beacon/.github/autopilot-repos.json` with `base-branch`, `runner`,
+  `max-points`, `offer-max-points` and `blocked-paths` (all required by the
+  dispatcher), plus `sensitive-paths`, `sensitive-diff`, `setup`,
+  `container-image`, `postgres-image`, `postgres-db` and `test-env` as needed.
+  Check the path lists against the repo's tree with
+  `node scripts/autopilot-paths-audit.js <autopilot-repos.json> <owner/repo> [ref]`.
+- Give the workflow a token on the target. Lumist-Labs repos: install
+  `lumist-release-bot` with contents, pull-requests and issues write. aretecp
+  repos have no App installation, so the dispatcher passes LumistBot's PAT
+  (`ARETECP_BOT_TOKEN`) as `TARGET_REPO_TOKEN`.
 - Create the labels `autopilot-queued`, `autopilot-offered`, `autopiloted`,
   `autopilot-already-fixed`, `autopilot-sensitive` and `needs-human`.
 - Confirm the repo's CI `pull_request` filter covers every `branch-prefixes`
   entry.
+- A new dispatcher field needs a matching input here first. A caller passing an
+  input `@v2` doesn't declare fails every dispatch, so merge and release the input
+  here before Beacon sends it.
 
-## The App token is not optional
+## Tokens
 
 A pull request opened with the default `GITHUB_TOKEN` does not fire
-`on: pull_request`. That is deliberate on GitHub's side — it stops workflows
-recursing — but it means an auto-PR opened that way arrives with **no checks at
-all**, which destroys the only real verification this design has. The PR is
-therefore opened with a GitHub App installation token, whose PRs do trigger
-workflows. If you ever see an autopilot PR with an empty checks list, that is the
-thing that broke.
+`on: pull_request`, and this workflow runs in beacon, whose token can't reach the
+target anyway. So every read and write on the target uses a `lumist-release-bot`
+installation token scoped to that one repo, or `TARGET_REPO_TOKEN`. If you ever see
+an autopilot PR with an empty checks list, the token is what broke.
+
+- `score` mints contents read, issues write and pull-requests read (the last for the
+  repeat guard).
+- `work` mints a read-only token for the checkout, and the write token only after
+  Claude exits. The App can push to protected `main` for `release-shared.yml`; it
+  must never be in reach of a prompt-injected session.
+- `TARGET_REPO_TOKEN` is live for the whole `work` job. It never enters a Claude
+  step's environment or the checkout, but it is not scoped to after Claude, so
+  that path's guarantee is narrower.
 
 ## The gate
 
-Two jobs. `score` decides; `work` runs only if `score` said `work`.
-
 `score` runs Claude with [`ci-autopilot-score.md`](../../.claude/prompts/ci-autopilot-score.md)
-and gets back strict JSON — points, decision, branch, the files it expects to
-touch, and the acceptance criteria. That JSON is then handed to
+and gets back strict JSON: points, confidence, decision (`work`, `review` or
+`already_fixed`), branch, files, acceptance criteria, `blocked_reason`,
+`questions_for_reporter` and `questions_for_dev`. That JSON goes to
 [`scripts/autopilot-verdict.js`](../../scripts/autopilot-verdict.js), **which is
-the actual guardrail**. The prompt is the fast path; the script is the boundary.
-It re-derives the decision itself. There are three outcomes:
+the actual guardrail**. It re-derives the decision itself and can overrule the
+model in one direction only: more restrictive.
 
-| Decision | When | Label |
+Each objection lands in one of three tiers:
+
+| Tier | Checks | Effect |
 |---|---|---|
-| `work` | ≤ `max-points`, confidence high, no hard stop | `autopilot-queued`, then `autopiloted` |
-| `offer` | ≤ `offer-max-points` or confidence medium, no hard stop | `autopilot-offered` — a Beacon admin decides |
-| `review` | anything else | `needs-human` |
+| unsafe | output not parseable JSON · points not on 1/2/3/5/8/13 · non-empty `blocked_reason` · a reported path matches `blocked-paths` · branch prefix outside `branch-prefixes` · branch not `<prefix>/<issue>-lowercase-kebab` | `review`, in every mode |
+| judged | points > `offer-max-points` · confidence missing or unrecognised · a reported path matches `sensitive-paths` | `review`; `override` waives it |
+| soft | the model chose `review` · points > `max-points` · confidence medium or low · no files · no acceptance criteria · any `questions_for_dev` | `offer`; `override` waives it |
 
-Confidence missing or unrecognised counts as low. These are hard stops, always
-`review` whatever the size:
+`decision: "already_fixed"` from the model short-circuits all three, except in
+`override` or when the output didn't parse.
 
-| Check | Why it is enforced outside the model |
-|---|---|
-| `points > offer-max-points`, or confidence low | The thresholds are the operator's call, not the model's |
-| any reported path matches `blocked-paths` | A model that was talked into `decision: "work"` cannot also talk its way past a regex |
-| any reported path matches `sensitive-paths` | Same, but a person may decide to build it: Start anyway waives this one |
-| no files, or no acceptance criteria | Nothing was actually authorized, and there is no definition of done |
-| branch prefix outside `branch-prefixes` | A prefix outside the target repo's CI branch filter gives the PR no checks, silently |
-| branch missing the issue number | The repeat-run guard matches on it |
-| output was not parseable JSON | Fail closed |
+| Decision | Label | Meaning |
+|---|---|---|
+| `work` | `autopilot-queued`, then `autopiloted` when the PR opens | build it now; LumistBot is assigned while it builds |
+| `offer` | `autopilot-offered` | a Beacon admin decides |
+| `review` | `needs-human` | a developer takes it |
+| `already_fixed` | `autopilot-already-fixed` | a person confirms and closes it |
 
-The comment posted to the issue lists whichever of these fired, so "why didn't it
-work this one" is answerable without opening the run log.
+Beacon's webhook maps exactly those four labels to its card state
+(`backend/app/routers/webhooks.py::_AUTOPILOT_LABELS`). `score` strips all four
+before adding one: re-adding a label the issue already has sends no `labeled`
+event, and Beacon would miss the new result.
+
+The comment posted to the issue lists every objection that fired, and carries a
+hidden `<!-- autopilot-verdict {json} -->` marker. Beacon stores the score from
+it, `questions` (reporter) and `questions_for_dev` included; the `work` job
+re-reads it as its brief.
 
 `work` then checks both patterns a third time, against the diff that actually
 happened on disk. A blocked hit refuses the push in every mode. A sensitive hit
@@ -108,6 +129,20 @@ Both are matched **case-insensitively** at both enforcement points (`grep -iE` i
 the work job and `new RegExp(…, 'i')` in the verdict script), so keep repo
 patterns lowercase, and ERE-only.
 
+## When Claude stops to ask
+
+The implementation prompt lets Claude stop instead of guessing, by emitting a
+`<questions>` block. If it changed nothing and asked something (in `auto` or
+`override`), `work` posts a verdict comment with `decision: "offer"` and the
+questions as `questions_for_dev`, relabels the issue `autopilot-offered` and
+unassigns LumistBot. Beacon shows the questions on the card; an answer re-scores
+it. If Claude changed files *and* asked, the PR opens with the questions in its
+body for the reviewer.
+
+A `<findings>` block (other bugs noticed along the way, up to three) is cut from
+the PR body and posted as an `<!-- autopilot-findings -->` comment. Beacon files
+each as its own report.
+
 ## What Claude can reach
 
 The issue body is untrusted — Beacon promotes end-user text and forwarded email
@@ -116,33 +151,53 @@ verbatim. So neither pass holds a token that can write to GitHub:
 - `score` runs with `--tools Read,Glob,Grep`, no `GH_TOKEN`, and the default
   permission mode, which denies reads outside the checkout.
 - `work` checks out with `persist-credentials: false`, gives Claude no
-  `GH_TOKEN`, and mints the App token only after Claude exits. The App can push
-  to protected `main` for `release-shared.yml`; it must never be in reach of a
-  prompt-injected session.
+  `GH_TOKEN`, and runs `--permission-mode bypassPermissions` with `IS_SANDBOX=1`
+  inside the job container.
 
-What remains in reach during `work` is `ANTHROPIC_API_KEY` and the runner host
-itself (`bypassPermissions` includes Bash). Running `work` in a container is the
-fix for the second.
+Both jobs always run in `container-image` (default `ghcr.io/lumist-labs/ci-node:22`;
+Beacon sets `ci-autopilot-python` or `ci-autopilot-elixir` per repo). That keeps
+Bash off the runner host and avoids the uid-0 checkout failure on shared
+self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`
+and whatever the container can reach on the network.
+
+Untrusted inputs the prompts receive, all marked as data rather than instructions:
+
+- `evidence` — Beacon's redacted production log excerpt, truncated to 8000 characters.
+- `ci-logs` — fix mode's failing check tails, collected by Beacon.
+- Screenshots — [`scripts/autopilot-attachments.js`](../../scripts/autopilot-attachments.js)
+  downloads only Beacon's signed attachment URLs from the issue body (at most 6,
+  5 MB each) into `.autopilot-attachments/`, where the Read tool can open them.
 
 ## What the work job tests
 
-With a `setup` command, the job runs in the repo's `container-image`, installs
-what the tests need, starts Postgres when `postgres-image` is set, and exports
-`test-env`. Claude runs the tests it wrote, the existing tests for the files it
-changed, and lint, not the whole suite. The target repo's CI runs the full suite
-on the PR and is still the real gate.
+With a `setup` command, `work` installs what the tests need, starts Postgres
+when `postgres-image` is set, and exports `test-env` (keys that would change
+`PATH`, `HOME`, `GITHUB_*`, tokens and the like are refused). Claude runs the
+tests it wrote, the existing tests for the files it changed, and lint, not the
+whole suite. Tracked files `setup` rewrote (a lockfile after `mix deps.get`) are
+restored before the push unless Claude edited them. The target repo's CI runs the
+full suite on the PR and is still the real gate.
 
 Without `setup`, nothing runs before the push, and the PR body says so.
 
 ## Re-running, and not running twice
 
-The `score` job stops before spending anything if the issue is already labelled
-`autopiloted`, or if a branch matching `*/<issue#>-*` already exists on the
-remote, or if the issue is closed. Either marker alone is enough — the label survives a deleted branch, the
+The `score` job stops before spending anything if the issue is closed, already
+labelled `autopiloted`, or has a live branch matching `<prefix>/<issue#>-*` on the
+remote. Either marker alone is enough: the label survives a deleted branch, the
 branch survives a stripped label.
 
-To deliberately re-run after editing an issue body: delete the branch, remove the
-`autopiloted` label, and trigger it again from Beacon.
+A branch is **scrapped**, not live, when every PR on it is closed unmerged and
+carries the `Opened automatically by [Autopilot]` line Autopilot writes at the top
+of its PR body. A scrapped branch doesn't block, and `work` force-pushes over it.
+A branch with an open or merged PR, or no PR at all (a person's own branch), stops
+the run. If the PR lookup fails, the branch is treated as live and the run stops
+with a warning.
+
+Beacon's Retry on a report whose Autopilot PR was closed unmerged removes the
+`autopiloted` label and dispatches again (`backend/app/routers/reports.py`). To
+re-run by hand: close the PR unmerged (or delete the branch), remove
+`autopiloted`, and trigger it from Beacon.
 
 `cancel-in-progress` is **false** here, unlike triage. A cancel landing between
 `git push` and `gh pr create` leaves an orphan branch and no PR, which is worse
@@ -150,9 +205,15 @@ than a duplicate run the guard would have caught anyway.
 
 ## When a run fails
 
-Both jobs label the issue `needs-human` and comment with the run URL. The `work`
-job leaves any pushed branch in place. A half-finished run must not sit there looking
+`score` comments with the run URL and labels the issue `needs-human`. `work`
+comments with an `<!-- autopilot-failure {"reason","run"} -->` marker and the last
+reason a step recorded, relabels `autopilot-queued` → `needs-human` and unassigns
+LumistBot. A null reason tells Beacon to ask the jobs API which step died. Any
+pushed branch is left in place. A half-finished run must not sit there looking
 queued.
+
+A `work` run where Claude changed nothing and asked nothing is a failure, with
+the first lines of its explanation as the reason.
 
 ## Issue titles are untrusted input
 

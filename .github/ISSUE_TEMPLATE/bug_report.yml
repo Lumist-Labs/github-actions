@@ -18,8 +18,8 @@ body:
     id: version
     attributes:
       label: Action version
-      description: The ref you're using (e.g. `v1`, `v1.0.0`, or a commit SHA)
-      placeholder: v1
+      description: The ref you're using (e.g. `v2`, `v2.44.1`, or a commit SHA)
+      placeholder: v2
     validations:
       required: true
 
@@ -55,9 +55,11 @@ body:
       description: The relevant `uses:` block and any inputs/env you passed. Redact secrets.
       render: yaml
       placeholder: |
-        - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v1
+        - uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
           with:
-            project-id: ${{ vars.INFISICAL_PROJECT_ID }}
+            method: oidc
+            identity-id: ${{ vars.INFISICAL_OIDC_IDENTITY_ID }}
+            project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
             environment: prod
     validations:
       required: true
