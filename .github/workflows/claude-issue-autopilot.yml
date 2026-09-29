@@ -9,19 +9,21 @@ name: Claude Issue Autopilot (shared)
 # settings from autopilot-repos.json. Target repos carry no autopilot files. Plan:
 # beacon docs/features/auto-dev-loop/CONNECTING.md.
 #
-# Two jobs, and the split is the point:
+# Three jobs, and the split is the point:
 #
 #   score — reads the issue and the code, emits strict JSON (points, confidence,
 #           decision, branch, files, acceptance). Always comments. Labels the
 #           issue autopilot-queued, autopilot-offered, autopilot-already-fixed
 #           or needs-human.
-#   work  — runs ONLY when score said `work`. Branches, implements, commits,
-#           pushes, opens the draft PR.
+#   work  — runs ONLY when score said `work`. Implements with no write token
+#           and uploads the patch as an artifact.
+#   publish — fresh hosted runner. Applies the patch to a clean checkout,
+#           re-checks it, mints the write token, pushes, opens the draft PR.
 #
 # GUARDRAILS ARE LAYERS. The scoring prompt refuses invariant-touching work,
 # scripts/autopilot-verdict.js independently re-checks the returned `files[]`
 # against `blocked-paths` and `sensitive-paths` and overrules the model, and the
-# work job checks the diff that actually happened. Blocked paths are never
+# publish job checks the diff that actually happened. Blocked paths are never
 # pushed; sensitive ones only on an admin's Start anyway or a fix run, with the
 # PR labelled autopilot-sensitive. A prompt is not a security boundary.
 #
@@ -933,17 +935,19 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: autopilot-${{ github.run_id }}-${{ github.run_attempt }}
+          name: autopilot-${{ github.run_id }}
           path: /tmp/autopilot-out
           retention-days: 1
+          overwrite: true
           if-no-files-found: ignore
 
       - name: Return the workspace to the runner user
         if: always()
         run: chown -R "$(stat -c '%u:%g' .)" .
 
-  # Fresh GitHub-hosted runner: nothing Claude touched in the work container can
-  # reach this job, which is the only one that ever holds a token that can write.
+  # GitHub-hosted on purpose, not inputs.runner: Claude ran as root with the
+  # self-hosted host's tool cache mounted, so a later job there could inherit
+  # whatever it left. This is the only job that ever holds a token that can write.
   publish:
     needs: [score, work]
     if: always() && (needs.work.result == 'success' || needs.work.result == 'failure')
@@ -968,7 +972,7 @@ jobs:
 
       - name: Mint a write App token
         id: bot
-        if: env.USE_TARGET_TOKEN != 'true'
+        if: env.USE_TARGET_TOKEN != 'true' && needs.work.result == 'success'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
@@ -985,11 +989,40 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: autopilot-${{ github.run_id }}-${{ github.run_attempt }}
+          name: autopilot-${{ github.run_id }}
           path: /tmp/autopilot-out
 
+      # The artifact is untrusted: a process Claude left behind could have
+      # uploaded anything. Only these names are copied, never a symlink, and
+      # the JSON is re-capped here rather than trusted from work.
       - name: Stage the result
-        run: cp -r /tmp/autopilot-out/. /tmp/ 2>/dev/null || true
+        env:
+          WORK_RESULT: ${{ needs.work.result }}
+        run: |
+          set -euo pipefail
+          for f in changes.patch pr-body.md findings.json questions.json autopilot-failure.txt; do
+            src="/tmp/autopilot-out/$f"
+            if [ -f "$src" ] && [ ! -L "$src" ]; then cp -- "$src" "/tmp/$f"; fi
+          done
+          if [ "$WORK_RESULT" = success ] && [ ! -f /tmp/pr-body.md ]; then
+            echo "::error::work succeeded but its artifact is missing or incomplete; re-run the whole workflow, not only publish." | tee -a /tmp/autopilot-failure.txt
+            exit 1
+          fi
+          [ "$WORK_RESULT" = success ] || exit 0
+          node -e '
+            const fs = require("fs");
+            const read = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return []; } };
+            const findings = (Array.isArray(read("/tmp/findings.json")) ? read("/tmp/findings.json") : [])
+              .filter((f) => f && typeof f.title === "string" && f.title.trim())
+              .slice(0, 3)
+              .map((f) => ({ title: f.title.replace(/\s+/g, " ").trim().slice(0, 200), detail: String(f.detail || "").slice(0, 2000) }));
+            const questions = (Array.isArray(read("/tmp/questions.json")) ? read("/tmp/questions.json") : [])
+              .filter((x) => typeof x === "string" && x.trim())
+              .slice(0, 3)
+              .map((x) => x.replace(/\s+/g, " ").trim().slice(0, 300));
+            fs.writeFileSync("/tmp/findings.json", JSON.stringify(findings));
+            fs.writeFileSync("/tmp/questions.json", JSON.stringify(questions));
+          '
 
       - name: Checkout target repository at the work job's base
         if: needs.work.result == 'success'
@@ -1025,7 +1058,17 @@ jobs:
           gh issue view "$ISSUE" -R "$REPO" --json title -q .title > /tmp/issue-title.txt
           if [ "$MODE" != fix ]; then git checkout -b "$BRANCH"; else git checkout -B "$BRANCH"; fi
           if [ -s /tmp/changes.patch ]; then git apply --index --binary /tmp/changes.patch; fi
-          git diff --cached --name-only --no-renames "$BASE_SHA" > /tmp/changed.txt
+          # NUL-delimited: git quotes unusual names, and a quoted name slips past
+          # the anchored blocked patterns. A name with a control character is refused.
+          git diff --cached -z --name-only --no-renames "$BASE_SHA" > /tmp/changed.z
+          if ! node -e '
+            const names = require("fs").readFileSync("/tmp/changed.z", "utf8").split("\0").filter(Boolean);
+            if (names.some((n) => /[\x00-\x1f\x7f]/.test(n))) process.exit(1);
+            require("fs").writeFileSync("/tmp/changed.txt", names.map((n) => n + "\n").join(""));
+          '; then
+            echo "::error::The implementation added a path with a control character in its name. Refusing to push." | tee -a /tmp/autopilot-failure.txt
+            exit 1
+          fi
           echo "::group::Changed files"; cat /tmp/changed.txt; echo "::endgroup::"
           if [ ! -s /tmp/changed.txt ] && [ "$MODE" != fix ] \
             && [ "$(node -e 'console.log(JSON.parse(require("fs").readFileSync("/tmp/questions.json","utf8")).length)')" -gt 0 ]; then
@@ -1269,10 +1312,23 @@ jobs:
 
           ${list}" || echo "::warning::could not post findings"
 
+      # Its own issues-only token, so a failed write mint still leaves a handback
+      # rather than an issue sitting there looking queued.
+      - name: Mint a token for the failure handback
+        id: rescue
+        if: (failure() || needs.work.result == 'failure') && env.USE_TARGET_TOKEN != 'true'
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ inputs.app-id || vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          owner: ${{ steps.target.outputs.owner }}
+          repositories: ${{ steps.target.outputs.name }}
+          permission-issues: write
+
       - name: Hand back to a human on failure
         if: failure() || needs.work.result == 'failure'
         env:
-          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.bot.outputs.token }}
+          GH_TOKEN: ${{ secrets.TARGET_REPO_TOKEN || steps.rescue.outputs.token }}
           REPO: ${{ inputs.repo }}
           ISSUE: ${{ inputs.issue }}
           MODE: ${{ inputs.mode }}
