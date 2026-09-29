@@ -194,7 +194,7 @@ on:
         type: string
         default: v2
       environment:
-        description: 'Job environment scope. Only needed for env-level secret access on the legacy forwarded-secret path.'
+        description: 'Job environment scope. Only needed when the caller keeps ANTHROPIC_API_KEY as an environment secret.'
         required: false
         type: string
         default: ''

@@ -159,8 +159,8 @@ Both jobs always run in `container-image` (default `ghcr.io/lumist-labs/ci-node:
 Beacon sets `ci-autopilot-python` or `ci-autopilot-elixir` per repo). That keeps
 Bash off the runner host and avoids the uid-0 checkout failure on shared
 self-hosted workspaces. What remains in reach during `work` is `ANTHROPIC_API_KEY`
-and the network. Neither job requests `id-token`: the runner exposes OIDC request
-credentials to every step, and Infisical would trade a minted token for the org
+and the network. Neither job requests `id-token`: a job that has it exposes OIDC
+request credentials to every step, and Infisical would trade a minted token for the org
 identity that reads every app's secrets. The key comes only from the caller's
 forwarded `secrets.ANTHROPIC_API_KEY`.
 
