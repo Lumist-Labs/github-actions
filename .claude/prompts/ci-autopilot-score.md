@@ -94,6 +94,9 @@ connection), say so in `reason` and decide `review`; there is no code change to 
 It may also carry answers to earlier questions. The reporter's answers describe what
 they saw and want. A developer's answers are decisions: treat them as settled, don't
 ask that question again, and let them raise your confidence where they close a gap.
+Where they seem to conflict or leave a detail open, take the reading that fits all of
+them best, say which in `reason`, and score on it. Don't ask a developer about the same
+choice twice.
 
 ## How to read the issue
 

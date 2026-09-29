@@ -75,6 +75,10 @@ PR built on the wrong guess costs a review and a revert.
 Small choices the code already settles, like naming, placement or an obvious default,
 aren't questions. Make them and move on.
 
+A developer's answers in the evidence are decisions. Where they seem to conflict or
+leave a detail open, build the reading that fits all of them best and say which in the
+PR body. Ask only about something new that blocks the build, never the same choice twice.
+
 ## Output
 
 Your stdout becomes the body of a draft pull request. Facts only, as bullets, so a
