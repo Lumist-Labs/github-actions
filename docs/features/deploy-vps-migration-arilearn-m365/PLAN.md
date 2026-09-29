@@ -1,6 +1,10 @@
 # Migrate `arilearn-phx` and `ms-365-mcp-server` to `deploy-vps-shared.yml@v2`
 
-Status: **Side 1 done for `ms-365-mcp-server`; `arilearn-phx` blocked on one decision**
+Status: In progress (checked 2026-09-29). `arilearn-phx`, now `Lumist-Labs/lumilearn`, is
+done: its deploys call `deploy-vps-shared.yml@v2`. `ms-365-mcp-server` is not migrated:
+its `deploy-prod.yml` still runs its own SSH deploy over `load-infisical-secrets@v2`,
+`tailscale-connect@v1` and `wait-for-healthy@v2`. The rest of this plan predates both
+facts; only the ms-365 sections still apply.
 
 Runbook Step 1.1 (multi-line audit) **passes for both repos** — no multi-line
 values, so nothing halts the migration. Side 2 dry-export has been run; results

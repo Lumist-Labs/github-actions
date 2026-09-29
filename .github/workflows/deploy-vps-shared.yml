@@ -11,7 +11,7 @@ name: Deploy to VPS (shared)
 #   2. Load the infra/deploy folder (default: /tailscale) in env mode — yields
 #      TAILSCALE_AUTHKEY, VPS_TAILSCALE_IP, VPS_SSH_KEY. Never written to the
 #      app .env.
-#   3. Connect to the Tailscale tailnet via tailscale-connect@v1.
+#   3. Connect to the Tailscale tailnet via tailscale-connect@v2.
 #   4. Write the rendered env file to the VPS over ssh (base64 via ssh-action).
 #   5. allow-clone gate: dev may clone; prod refuses clone (requires existing
 #      checkout on the VPS).
@@ -24,8 +24,8 @@ name: Deploy to VPS (shared)
 # rollback-vps-shared and copy-prod-db-shared also consume. The proven core
 # VPS logic lives in exactly one place.
 #
-# Scope: deploy-from-scratch only (v2). Rollback and copy-prod-db are a
-# fast-follow, not covered here.
+# Rollback and prod-to-dev DB copy are rollback-vps-shared.yml and
+# copy-prod-db-shared.yml.
 #
 # REQUIRED CALLER PERMISSIONS
 # ---------------------------

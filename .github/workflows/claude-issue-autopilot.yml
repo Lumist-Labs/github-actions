@@ -13,7 +13,8 @@ name: Claude Issue Autopilot (shared)
 #
 #   score — reads the issue and the code, emits strict JSON (points, confidence,
 #           decision, branch, files, acceptance). Always comments. Labels the
-#           issue work, offer or needs-human.
+#           issue autopilot-queued, autopilot-offered, autopilot-already-fixed
+#           or needs-human.
 #   work  — runs ONLY when score said `work`. Branches, implements, commits,
 #           pushes, opens the draft PR.
 #
@@ -58,7 +59,7 @@ name: Claude Issue Autopilot (shared)
 #   that path the guarantee is narrower: it is never in a Claude step's
 #   environment and never left in the checkout, but it isn't scoped to after.
 #   Each target needs the labels autopilot-queued, autopilot-offered,
-#   autopiloted and needs-human.
+#   autopiloted, autopilot-already-fixed, autopilot-sensitive and needs-human.
 
 on:
   workflow_call:
