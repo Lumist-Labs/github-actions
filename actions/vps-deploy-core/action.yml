@@ -1,7 +1,7 @@
 name: VPS Deploy Core
 description: >-
   Composite action encapsulating the shared VPS deploy scaffolding used by
-  deploy-vps-shared, rollback-vps-shared, and copy-prod-db-shared. Handles
+  deploy-vps-shared and rollback-vps-shared. Handles
   Infisical secret loads (dotenv + env modes), env-file render/encode/write,
   repo checkout, optional pre-deploy DB backup, Docker Compose up, and the
   wait-for-healthy healthcheck.

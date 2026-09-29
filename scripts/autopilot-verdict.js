@@ -15,16 +15,17 @@
 // saying `review`; it can never talk its way past a blocked path, an unknown
 // branch prefix, or the point threshold.
 //
-// Three outcomes: `work` runs now, `offer` waits for a Beacon admin, `review`
-// goes to a human. Anything that makes the change unsafe or unauthorized is a
-// hard stop and always `review`; only size and confidence can land on `offer`.
+// Four outcomes: `work` runs now, `offer` waits for a Beacon admin, `review`
+// goes to a human, `already_fixed` asks a person to confirm and close. Anything
+// that makes the change unsafe or unauthorized is a hard stop and always
+// `review`; only size and confidence can land on `offer`.
 //
 // OVERRIDE=true is a Beacon admin's trigger. It waives size, confidence and the
 // model's own `review`, never a stop that makes the change unsafe.
 //
 // Blocked paths are never built. Sensitive paths are judged: a person decides,
 // and an admin's Start anyway can build them. See
-// docs/features/autopilot-path-tiers/PLAN.md.
+// docs/runbooks/issue-autopilot.md.
 //
 // Reads from env: MAX_POINTS, OFFER_MAX_POINTS, BLOCKED_PATHS, SENSITIVE_PATHS,
 // BRANCH_PREFIXES, OVERRIDE, ISSUE, GITHUB_OUTPUT.
@@ -128,7 +129,7 @@ if (sensitiveHits.length) {
   judged.push(`touches sensitive paths — ${sensitiveHits.join(', ')}`);
 }
 
-// Judged, not unsafe: an admin's Start anyway must be able to build an issue
+// Soft, not unsafe: an admin's Start anyway must be able to build an issue
 // the scorer wouldn't scope. The work job re-checks the real diff against the
 // protected paths before anything is pushed, so that guard still holds.
 if (!files.length) {

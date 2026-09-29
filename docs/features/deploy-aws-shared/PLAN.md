@@ -1,6 +1,11 @@
 # Shared AWS deploy action
 
-**Status:** Ready
+**Status:** In progress (checked 2026-09-29). B1 shipped without the
+`teams-notify` failure step (failure notification stays with the caller).
+`aws-deploy-core` has `s3-cloudfront`, `ec2-compose` and `ecs-service`, and
+`ecr-build-push` exists. lumios and vector call both from their own workflows.
+`lambda-image` (B2), `deploy-aws-shared.yml` (B3), the migrations (B4, B5) and
+`rollback-aws-shared.yml` (B6) are not built.
 **Created:** 2026-08-21
 **Issue:** #96
 **Related:** `lumist-terraform-infrastructure` → `docs/features/lumios-aws-hosting/PLAN.md`

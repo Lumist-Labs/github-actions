@@ -11,21 +11,22 @@ name: Deploy to VPS (shared)
 #   2. Load the infra/deploy folder (default: /tailscale) in env mode — yields
 #      TAILSCALE_AUTHKEY, VPS_TAILSCALE_IP, VPS_SSH_KEY. Never written to the
 #      app .env.
-#   3. Connect to the Tailscale tailnet via tailscale-connect@v1.
+#   3. Connect to the Tailscale tailnet via tailscale-connect@v2.
 #   4. Write the rendered env file to the VPS over ssh (base64 via ssh-action).
 #   5. allow-clone gate: dev may clone; prod refuses clone (requires existing
 #      checkout on the VPS).
-#   6. docker compose --env-file <env-file-name> up -d --pull always, or
+#   6. docker compose --env-file <env-file-name> up -d (--build unless
+#      compose-build is false), or
 #      deploy-command instead for an app that deploys itself.
 #   7. scripts/wait-for-healthy.sh over healthcheck-containers, when set.
 #   8. post-deploy-command, when set.
 #
 # All scaffolding is delegated to actions/vps-deploy-core — a composite that
-# rollback-vps-shared and copy-prod-db-shared also consume. The proven core
+# rollback-vps-shared also consumes. The proven core
 # VPS logic lives in exactly one place.
 #
-# Scope: deploy-from-scratch only (v2). Rollback and copy-prod-db are a
-# fast-follow, not covered here.
+# Rollback and prod-to-dev DB copy are rollback-vps-shared.yml and
+# copy-prod-db-shared.yml.
 #
 # REQUIRED CALLER PERMISSIONS
 # ---------------------------
@@ -352,7 +353,7 @@ on:
       deploy-concurrency-group:
         description: >-
           Override the serialisation key for VPS operations. Defaults to
-          `vps-<vps-user>-<repo-dir>`, which serialises EVERY operation
+          `vps-<caller repo>-<vps-user>-<repo-dir>`, which serialises EVERY operation
           targeting that directory — dev and prod, deploy and rollback and
           copy-db — because they all `git checkout --force` in it. Set this only
           with a specific reason; a value that differs per workflow re-opens the
