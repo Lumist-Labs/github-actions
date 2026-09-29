@@ -828,19 +828,55 @@ jobs:
             echo "::warning::setup changed tracked files; they are kept out of the PR unless Claude edits them: $(cut -f2 /tmp/setup-dirty.txt | tr '\n' ' ')"
           fi
 
+      # Root in this container can write the runner's bind mounts (the tool cache
+      # and workspaces later jobs on this self-hosted host reuse) and read every
+      # root process's environment. Claude gets its own uid that can write only
+      # the checkout. .git stays root's, so nothing it does can plant a hook or
+      # config for the root git calls after it, and the /tmp files root writes
+      # later are created now so this uid can't pre-plant them as symlinks.
+      - name: Hand the checkout to an unprivileged user
+        id: sandbox
+        run: |
+          set -euo pipefail
+          uid=59000
+          if [ "$(stat -c '%u' .)" = "$uid" ]; then uid=59001; fi
+          useradd --uid "$uid" --user-group --create-home --shell /bin/bash autopilot
+          git config --system --add safe.directory '*'
+          chown -R autopilot:autopilot .
+          chown -R root:root .git
+          chmod -R go-w .git
+          # Tooling setup left in root's home (uv, pip, npm and mix caches).
+          for d in .cache .mix .hex .npm .local .config; do
+            if [ -d "/root/$d" ]; then cp -a "/root/$d" /home/autopilot/; fi
+          done
+          chown -R autopilot:autopilot /home/autopilot
+          chmod 644 /tmp/work-prompt.txt
+          touch /tmp/pr-body.md /tmp/work-stderr.log /tmp/findings.json /tmp/questions.json /tmp/autopilot-failure.txt
+          mkdir -p /tmp/autopilot-out
+          echo "uid=$uid" >> "$GITHUB_OUTPUT"
+
       # No GH_TOKEN, deliberately: the issue is already in the prompt file.
       - name: Run Claude implementation pass
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_MODEL: ${{ inputs.implement-model }}
           MAX_TURNS: ${{ inputs.max-turns }}
-          # The container runs as root, and Claude Code refuses bypassPermissions
-          # as root unless told it's sandboxed. It is: a throwaway container
-          # holding no GitHub token (the write token lives only in publish).
-          IS_SANDBOX: "1"
+          AUTOPILOT_UID: ${{ steps.sandbox.outputs.uid }}
         run: |
           set -euo pipefail
-          if ! claude \
+          # Nothing this uid starts outlives the step into the package step.
+          reap() {
+            for p in /proc/[0-9]*; do
+              if [ "$(stat -c '%u' "$p" 2>/dev/null)" = "$AUTOPILOT_UID" ]; then kill -KILL "${p#/proc/}" 2>/dev/null || true; fi
+            done
+          }
+          trap reap EXIT
+          # The runner's own variables stay with root; the key and the test env go through.
+          drop=()
+          while IFS= read -r v; do drop+=(-u "$v"); done < <(env | cut -d= -f1 | grep -E '^(ACTIONS_|GITHUB_|RUNNER_|INPUT_)' || true)
+          if ! setpriv --reuid="$AUTOPILOT_UID" --regid="$AUTOPILOT_UID" --clear-groups \
+            env "${drop[@]}" HOME=/home/autopilot USER=autopilot LOGNAME=autopilot \
+            claude \
             --print \
             --model "$CLAUDE_MODEL" \
             --system-prompt-file .shared-actions/.claude/prompts/ci-autopilot-implement.md \

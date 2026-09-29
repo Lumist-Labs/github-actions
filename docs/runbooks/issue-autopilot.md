@@ -153,8 +153,10 @@ verbatim. So neither pass holds a token that can write to GitHub:
 - `score` runs with `--tools Read,Glob,Grep`, no `GH_TOKEN`, and the default
   permission mode, which denies reads outside the checkout.
 - `work` checks out with `persist-credentials: false`, gives Claude no
-  `GH_TOKEN`, and runs `--permission-mode bypassPermissions` with `IS_SANDBOX=1`
-  inside the job container.
+  `GH_TOKEN`, and runs `--permission-mode bypassPermissions` as its own uid
+  (`autopilot`) via `setpriv`, with the runner's `ACTIONS_`/`GITHUB_`/`RUNNER_`
+  variables stripped. That uid owns the checkout and nothing else; `.git` stays
+  root's. Every process it started is killed when the step ends.
 
 Both jobs always run in `container-image` (default `ghcr.io/lumist-labs/ci-node:22`;
 Beacon sets `ci-autopilot-python` or `ci-autopilot-elixir` per repo). That keeps
@@ -169,9 +171,10 @@ Claude runs as root in the `work` container, so anything later in that job is
 treated as tainted: it only packages the patch, PR body, questions and findings
 as an artifact. `publish` treats all of it as data.
 
-Still open: root in the container can write the runner's bind mounts, including
-the tool cache that later jobs on the same self-hosted host reuse. Running Claude
-as an unprivileged user closes that.
+Claude's uid can't write the runner's bind mounts (the tool cache and workspaces
+later jobs on the same self-hosted host reuse), read root's process environment,
+or write the `GITHUB_ENV` file. Tooling that `setup` left in `/root` (uv, pip,
+npm and mix caches) is copied to its home first.
 
 Untrusted inputs the prompts receive, all marked as data rather than instructions:
 
