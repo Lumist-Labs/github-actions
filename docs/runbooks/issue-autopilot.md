@@ -30,6 +30,10 @@ unsupervised change and runs only when Beacon asks.
   characters, as data) and pushes one commit, `fix: #<issue> address review feedback`.
   It fails without `feedback`. The PR comment opens with
   `<!-- autopilot-revised {"run": "<url>"} -->`, which Beacon counts per PR.
+  If that PR already merged, its branch is done: the run branches
+  `<branch>-followup-<run>` off the base, which holds the merged change, and opens
+  a new draft PR titled `follow-up to #<pr>`, with the usual Autopilot line,
+  `Closes #<issue>` and the same marker (plus `"after": <pr>`) in its body.
 
 Only Beacon holds a token that can dispatch, so admin rights live in Beacon and
 nowhere else.
