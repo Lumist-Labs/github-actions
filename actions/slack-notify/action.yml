@@ -8,7 +8,7 @@ description: >-
 
 inputs:
   channel:
-    description: Channel ID to post to (C…), not the #name. The ID survives a channel rename.
+    description: Channel ID to post to (C…), not the channel name. The ID survives a channel rename.
     required: true
 
   title:
@@ -107,6 +107,12 @@ runs:
           exit 1
         fi
 
+        # Slack rejects an empty header or section as invalid_blocks, which reads as a mystery ok:false.
+        if [ -z "${INPUT_TITLE//[[:space:]]/}" ] || [ -z "${INPUT_TEXT//[[:space:]]/}" ]; then
+          echo "::error::title and text must both be non-empty"
+          exit 1
+        fi
+
         if ! printf '%s' "$INPUT_FACTS" | jq -e 'type == "array"' >/dev/null 2>&1; then
           echo "::error::facts must be a JSON array of {name,value} objects"
           exit 1
@@ -156,7 +162,7 @@ runs:
                                       text: ("*\(.name | tostring | esc)*\n\(.value | tostring | mrkdwn)" | clip(2000)) } ] } ]
                 + (if $url != "" then
                      [{ type: "actions",
-                        elements: [{ type: "button", text: { type: "plain_text", text: $label }, url: $url }] }]
+                        elements: [{ type: "button", text: { type: "plain_text", text: ($label | clip(75)) }, url: $url }] }]
                    else [] end)
                 + [{ type: "context",
                      elements: [{ type: "mrkdwn",
@@ -186,14 +192,34 @@ runs:
           exit 1
         fi
 
-        RESPONSE=$(curl -sS -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-          -H 'Content-Type: application/json; charset=utf-8' \
-          -d "$PAYLOAD" https://slack.com/api/chat.postMessage)
+        BODY_FILE=$(mktemp)
+        HEADERS_FILE=$(mktemp)
+        printf '%s' "$PAYLOAD" > "$BODY_FILE"
+
+        # Token goes in via stdin config so it never appears in argv (`ps` on shared runners).
+        post() {
+          printf 'header = "Authorization: Bearer %s"\n' "$SLACK_BOT_TOKEN" \
+            | curl -sS --max-time 30 -K - \
+                -H 'Content-Type: application/json; charset=utf-8' \
+                --data-binary @"$BODY_FILE" -D "$HEADERS_FILE" -o "$BODY_FILE.resp" -w '%{http_code}' \
+                https://slack.com/api/chat.postMessage
+        }
+
+        HTTP_CODE=$(post)
+        if [ "$HTTP_CODE" = "429" ]; then
+          WAIT=$(awk 'tolower($1) == "retry-after:" { print $2 + 0 }' "$HEADERS_FILE")
+          WAIT=${WAIT:-5}
+          if [ "$WAIT" -gt 30 ]; then WAIT=30; fi
+          echo "::warning::Slack rate-limited the post; retrying once in ${WAIT}s"
+          sleep "$WAIT"
+          HTTP_CODE=$(post)
+        fi
+        RESPONSE=$(cat "$BODY_FILE.resp")
 
         # Slack returns HTTP 200 + {"ok": false} for bad token/channel/scope, so curl -f can't catch it.
         if ! printf '%s' "$RESPONSE" | jq -e '.ok == true' >/dev/null 2>&1; then
           ERROR=$(printf '%s' "$RESPONSE" | jq -r '.error // "unparseable response"' 2>/dev/null || echo "unparseable response")
-          echo "::error::Slack rejected the message: ${ERROR}"
+          echo "::error::Slack rejected the message (HTTP ${HTTP_CODE}): ${ERROR}"
           exit 1
         fi
 

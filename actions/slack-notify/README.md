@@ -30,7 +30,7 @@ var, and adding `channel`.
 - name: Notify Slack
   uses: Lumist-Labs/github-actions/actions/slack-notify@v2
   env:
-    SLACK_BOT_TOKEN: ${{ env.HOUSTON_SLACK_BOT_TOKEN }}
+    SLACK_BOT_TOKEN: ${{ env.SLACK_BOT_TOKEN }}
   with:
     channel: ${{ env.SLACK_CHANNEL_DEVS_DEPLOYS }}
     username: Houston · Deploys
@@ -72,8 +72,8 @@ var, and adding `channel`.
 | `SLACK_BOT_TOKEN` | A bot token (`xoxb-…`) with `chat:write`. Add `chat:write.public` to post to public channels the bot hasn't joined. |
 
 **Not an input, deliberately.** Per [CONTRIBUTING.md](../../CONTRIBUTING.md), secrets go through
-`env:` at the call site. The name is generic because any Slack app can post through this
-action: map your app's token onto it (`SLACK_BOT_TOKEN: ${{ env.HOUSTON_SLACK_BOT_TOKEN }}`).
+`env:` at the call site. Each Slack app keeps its tokens under its own Infisical folder
+(`/slack/houston`, …) with the same key names, so loading one folder gives you `SLACK_BOT_TOKEN`.
 
 ## Message layout
 
