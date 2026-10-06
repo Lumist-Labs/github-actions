@@ -1,0 +1,201 @@
+name: Slack Notify
+description: >-
+  Post a Block Kit message to a Slack channel via chat.postMessage. The Slack
+  counterpart of teams-notify: same title/text/status/facts/button inputs, plus
+  the channel to post to and an optional per-sender name and icon.
+
+# Token comes via `env: SLACK_BOT_TOKEN`, not an input (CONTRIBUTING.md); generic name so any app's bot token fits.
+
+inputs:
+  channel:
+    description: Channel ID to post to (C…), not the #name. The ID survives a channel rename.
+    required: true
+
+  title:
+    description: Message header, also the notification preview text. Lead with the outcome.
+    required: true
+
+  text:
+    description: >-
+      Body text. Slack mrkdwn; the two common Markdown forms callers already use
+      with teams-notify — **bold** and [label](url) — are converted.
+    required: true
+
+  status:
+    description: >-
+      Semantic status controlling the colour bar.
+      One of `info`, `success`, `warning`, `failure`.
+    required: false
+    default: info
+
+  facts:
+    description: >-
+      Optional JSON array of {"name","value"} objects rendered as a two-column
+      field grid. Example: '[{"name":"App","value":"arilearn"}]'
+    required: false
+    default: '[]'
+
+  button-url:
+    description: Optional URL for a link button.
+    required: false
+    default: ''
+
+  button-label:
+    description: Label for the button when `button-url` is set.
+    required: false
+    default: View
+
+  username:
+    description: Optional sender name shown on the message (e.g. "Houston · Deploys"). Needs the chat:write.customize scope.
+    required: false
+    default: ''
+
+  icon-emoji:
+    description: Optional sender icon as an emoji code (e.g. ":rocket:"). Needs the chat:write.customize scope.
+    required: false
+    default: ''
+
+  dry-run:
+    description: >-
+      Build and print the payload without posting. Lets smoke tests exercise
+      payload construction without spamming a real channel.
+    required: false
+    default: 'false'
+
+outputs:
+  payload:
+    description: The JSON payload that was sent (or would have been, under dry-run).
+    value: ${{ steps.post.outputs.payload }}
+  ts:
+    description: Timestamp of the posted message, for threading replies or chat.update. Empty under dry-run.
+    value: ${{ steps.post.outputs.ts }}
+
+runs:
+  using: composite
+  steps:
+    - name: Post message to Slack
+      id: post
+      shell: bash
+      env:
+        INPUT_CHANNEL: ${{ inputs.channel }}
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_TEXT: ${{ inputs.text }}
+        INPUT_STATUS: ${{ inputs.status }}
+        INPUT_FACTS: ${{ inputs.facts }}
+        INPUT_BUTTON_URL: ${{ inputs.button-url }}
+        INPUT_BUTTON_LABEL: ${{ inputs.button-label }}
+        INPUT_USERNAME: ${{ inputs.username }}
+        INPUT_ICON_EMOJI: ${{ inputs.icon-emoji }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+      run: |
+        set -euo pipefail
+
+        # info is the Lumist iris; the other three match teams-notify.
+        case "$INPUT_STATUS" in
+          info)    COLOR='#6957D8' ;;
+          success) COLOR='#2EA043' ;;
+          warning) COLOR='#D29922' ;;
+          failure) COLOR='#B60205' ;;
+          *)
+            echo "::error::status must be one of info|success|warning|failure (got '${INPUT_STATUS}')"
+            exit 1
+            ;;
+        esac
+
+        if [ -z "$INPUT_CHANNEL" ]; then
+          echo "::error::channel is required (a channel ID like C0123456789)"
+          exit 1
+        fi
+
+        if ! printf '%s' "$INPUT_FACTS" | jq -e 'type == "array"' >/dev/null 2>&1; then
+          echo "::error::facts must be a JSON array of {name,value} objects"
+          exit 1
+        fi
+
+        SHORT_SHA="${GITHUB_SHA:0:7}"
+        RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+        # Escape before link conversion, or the <url|label> it emits gets escaped too.
+        # Slack rejects the whole message past its size caps, so clip instead.
+        PAYLOAD=$(jq -n \
+          --arg channel "$INPUT_CHANNEL" \
+          --arg title "$INPUT_TITLE" \
+          --arg text "$INPUT_TEXT" \
+          --arg color "$COLOR" \
+          --argjson facts "$INPUT_FACTS" \
+          --arg url "$INPUT_BUTTON_URL" \
+          --arg label "$INPUT_BUTTON_LABEL" \
+          --arg username "$INPUT_USERNAME" \
+          --arg icon "$INPUT_ICON_EMOJI" \
+          --arg repo "$GITHUB_REPOSITORY" \
+          --arg sha "$SHORT_SHA" \
+          --arg actor "$GITHUB_ACTOR" \
+          --arg run_url "$RUN_URL" \
+          '
+          def esc: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+          def mrkdwn:
+            esc
+            | gsub("\\*\\*(?<b>[^*]+)\\*\\*"; "*\(.b)*")
+            | gsub("\\[(?<l>[^\\]]+)\\]\\((?<u>[^)\\s]+)\\)"; "<\(.u)|\(.l)>");
+          def clip($n): if length > $n then .[0:$n-1] + "…" else . end;
+
+          {
+            channel: $channel,
+            text: ($title | esc),
+            unfurl_links: false,
+            unfurl_media: false,
+            blocks: [{ type: "header", text: { type: "plain_text", text: ($title | clip(150)), emoji: true } }],
+            attachments: [{
+              color: $color,
+              blocks: (
+                [{ type: "section", text: { type: "mrkdwn", text: ($text | mrkdwn | clip(3000)) } }]
+                + [ $facts as $f | range(0; $f | length; 10) as $i
+                    | { type: "section",
+                        fields: [ $f[$i:$i+10][]
+                                  | { type: "mrkdwn",
+                                      text: ("*\(.name | tostring | esc)*\n\(.value | tostring | mrkdwn)" | clip(2000)) } ] } ]
+                + (if $url != "" then
+                     [{ type: "actions",
+                        elements: [{ type: "button", text: { type: "plain_text", text: $label }, url: $url }] }]
+                   else [] end)
+                + [{ type: "context",
+                     elements: [{ type: "mrkdwn",
+                                  text: "<\($run_url)|\($repo | esc)> · `\($sha)` · \($actor | esc)" }] }]
+              )
+            }]
+          }
+          + (if $username != "" then { username: $username } else {} end)
+          + (if $icon != "" then { icon_emoji: $icon } else {} end)
+          ')
+
+        {
+          echo 'payload<<PAYLOAD_EOF'
+          printf '%s\n' "$PAYLOAD"
+          echo 'PAYLOAD_EOF'
+        } >> "$GITHUB_OUTPUT"
+
+        if [ "$INPUT_DRY_RUN" = "true" ]; then
+          echo "dry-run — not posting. Payload:"
+          printf '%s\n' "$PAYLOAD" | jq .
+          echo "ts=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if [ -z "${SLACK_BOT_TOKEN:-}" ]; then
+          echo "::error::SLACK_BOT_TOKEN env var is required (pass it via env: at the call site, not as an input)"
+          exit 1
+        fi
+
+        RESPONSE=$(curl -sS -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+          -H 'Content-Type: application/json; charset=utf-8' \
+          -d "$PAYLOAD" https://slack.com/api/chat.postMessage)
+
+        # Slack returns HTTP 200 + {"ok": false} for bad token/channel/scope, so curl -f can't catch it.
+        if ! printf '%s' "$RESPONSE" | jq -e '.ok == true' >/dev/null 2>&1; then
+          ERROR=$(printf '%s' "$RESPONSE" | jq -r '.error // "unparseable response"' 2>/dev/null || echo "unparseable response")
+          echo "::error::Slack rejected the message: ${ERROR}"
+          exit 1
+        fi
+
+        echo "ts=$(printf '%s' "$RESPONSE" | jq -r '.ts')" >> "$GITHUB_OUTPUT"
+        echo "Posted to Slack."

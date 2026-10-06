@@ -11,7 +11,7 @@ Public repo. Base branch `main`, no `develop`. PRs go to `main`.
 | Path | What |
 |---|---|
 | `.github/workflows/*-shared.yml`, `claude-issue-*.yml`, `pr-to-main-hooks.yml` | Reusable workflows (`workflow_call`) consumers call |
-| `.github/workflows/{release,lint-workflows,smoke-teams-notify,ci-images,pr-hooks,entra-secret-detector}.yml` | This repo's own CI, release and cron jobs |
+| `.github/workflows/{release,lint-workflows,smoke-teams-notify,smoke-slack-notify,ci-images,pr-hooks,entra-secret-detector}.yml` | This repo's own CI, release and cron jobs |
 | `actions/<name>/action.yml` | Composite actions |
 | `.claude/prompts/` | System prompts for triage and Autopilot, checked out at run time via `shared-ref` |
 | `scripts/` | Scripts workflows run: Autopilot guardrail (`autopilot-verdict.js`), healthcheck, Entra scan |
@@ -29,7 +29,8 @@ grep -rn 'uses: *\./' actions/      # must print nothing
 node --test scripts/*.test.js       # node 22
 ```
 
-- `smoke-teams-notify.yml`: PRs touching `actions/teams-notify/**`, dry-run payload asserts.
+- `smoke-teams-notify.yml`, `smoke-slack-notify.yml`: PRs touching `actions/{teams,slack}-notify/**`, dry-run payload asserts.
+  The Slack one also posts with a fake token to prove `ok: false` fails the step.
 - `ci-images.yml`: PRs touching `images/**` build each image and run its `smoke.sh`
   (the two `autopilot-*` images have none, so the step passes without testing them).
   Push to `main`, the Sunday cron and dispatch also publish to `ghcr.io/lumist-labs/ci-*`.
@@ -60,7 +61,7 @@ Detail: [`RELEASING.md`](RELEASING.md).
   another action as `Lumist-Labs/github-actions/actions/<x>@v2`, never `./actions/<x>`.
   A `./` path resolves against the caller's checkout, which has no `actions/` directory.
   Only workflows that run in this repo and check it out (`entra-secret-detector.yml`,
-  `smoke-teams-notify.yml`) may use `./`.
+  `smoke-{teams,slack}-notify.yml`) may use `./`.
 - **No `runner` context in job-level `env:`.** It does not warn. The workflow becomes
   invalid and every run fails at startup with no jobs and no log. Use step-level `env:`.
 - **`shared-ref` defaults track the major tag.** `claude-issue-triage.yml` and
