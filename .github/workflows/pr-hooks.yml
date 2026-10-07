@@ -2,7 +2,7 @@ name: PR Hooks
 
 # This repo consuming its own reusable workflow. Same shim every other repo has:
 # retitle each PR `… → <base>`, and on PRs into main write the summary body,
-# link issues, request core review and post the Teams card.
+# link issues, request core review and post the Teams and Slack cards.
 #
 # `@v2`, not a relative path: a reusable workflow `uses:` takes no expressions,
 # so this pins the released version like any other consumer. A change to
