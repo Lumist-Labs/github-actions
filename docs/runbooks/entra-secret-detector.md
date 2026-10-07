@@ -61,7 +61,7 @@ to say.
 |---|---|
 | Nothing in window | Report only. Closes any open tracking issue. |
 | Something within 30 days | Opens or **edits in place** a single issue labelled `entra-secret-expiry` |
-| Something already expired | Same, plus a warning annotation, plus a Teams re-nag every 7 days until resolved |
+| Something already expired | Same, plus a warning annotation, plus a Teams and Slack re-nag every 7 days until resolved |
 
 The issue is reused and edited rather than recreated, otherwise a daily cron
 accumulates 30 duplicates.
@@ -74,7 +74,7 @@ unreachable. It does *not* mean a credential expired.
 This used to `exit 1` on any expired credential. That overloaded the signal: once
 the run was red every day for a known expiry, a genuinely broken watchdog became
 indistinguishable from the expected noise, which is the exact failure this exists
-to prevent. Findings travel by issue and Teams, where someone acts on them.
+to prevent. Findings travel by issue, Teams and Slack, where someone acts on them.
 
 ### Rotatable ≠ the app is in Terraform
 
@@ -89,11 +89,17 @@ ones it made. Seeing an app in the workspace and assuming its secrets are handle
 is how the arilearn secret expired unnoticed — the app looked managed; the
 credential that died was hand-made in the portal.
 
-## Teams notifications
+## Teams and Slack notifications
 
-Posts to the existing PR-notify channel (`lumist-labs-shared/prod/teams/pr-notify`) via
-[`actions/teams-notify`](../../actions/teams-notify). Reusing the channel the team
-already watches is the point — a GitHub issue nobody has open is not a notification.
+Posts to the existing Teams PR-notify channel (`lumist-labs-shared/prod/teams/pr-notify`) via
+[`actions/teams-notify`](../../actions/teams-notify), and to Slack `#devs-alerts` as
+`Houston · Alerts` via [`actions/slack-notify`](../../actions/slack-notify) (token from
+`/slack/houston`, channel ID from `/slack/channels`). Teams goes away at the Slack cutover.
+Posting where the team already looks is the point — a GitHub issue nobody has open is not
+a notification.
+
+The two posts are independent: the Slack steps run on `!cancelled()`, so either one
+failing still turns the run red without stopping the other.
 
 **Fires on state change only, never on a timer.** The report embeds a
 `<!-- detector-state: <hash> -->` marker in the tracking issue; the next run compares
@@ -102,7 +108,7 @@ expired, so:
 
 | Situation | Behaviour |
 |---|---|
-| Same credentials, a day closer | Issue edited quietly. **No Teams post.** |
+| Same credentials, a day closer | Issue edited quietly. **No post.** |
 | A new credential enters the window | Posts (warning) |
 | One tips from expiring into expired | Posts (failure) — the hash changes even though the credential set didn't |
 | Everything leaves the window | Posts "all clear" (success), closes the issue |
@@ -112,14 +118,14 @@ entire purpose. That's why the transition check exists rather than posting every
 
 ### Why this is a dead-man's switch
 
-Once the rotator lands, its Teams message says *what is about to happen* — so
+Once the rotator lands, its message says *what is about to happen* — so
 **silence afterwards is itself the alarm**. That's strictly better than
 notify-on-failure: a pipeline that dies before reaching its error handler never sends
 a failure message at all, and you'd read the silence as success.
 
 It only works if a broken notifier is loud, which is why `teams-notify` fails the
-step on any non-2xx webhook response. A revoked webhook shows up as a red run rather
-than notifications that quietly stopped arriving.
+step on any non-2xx webhook response and `slack-notify` on Slack's `ok: false`. A revoked
+webhook or token shows up as a red run rather than notifications that quietly stopped arriving.
 
 The "starting" message also gives the team a **veto window** — if it lands during a
 release or an incident, cancel the workflow run. Nothing has changed at that point.
