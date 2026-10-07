@@ -24,7 +24,7 @@ referenced at `@v2` too, so one tag move ships the whole graph.
 | `ecr-build-push` | — (AWS and Docker upstream actions, SHA-pinned) | — |
 
 Workflows that run in this repo only: `release.yml`, `lint-workflows.yml`,
-`smoke-teams-notify.yml`, `ci-images.yml`, `pr-hooks.yml` (dogfoods
+`smoke-teams-notify.yml`, `smoke-slack-notify.yml`, `ci-images.yml`, `pr-hooks.yml` (dogfoods
 `pr-to-main-hooks.yml@v2`), and `entra-secret-detector.yml` (uses `./actions/load-infisical-secrets`,
 `./actions/teams-notify` and `scripts/entra-credential-scan.sh` from its own checkout).
 

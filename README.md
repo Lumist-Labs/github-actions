@@ -16,6 +16,7 @@ that still call them. Consumers pin `@v2`. Working in this repo: start at
 | [`aws-deploy-core`](actions/aws-deploy-core) | Assume an AWS role via OIDC, resolve names from SSM, deploy, wait until live. Targets `s3-cloudfront`, `ec2-compose`, `ecs-service`. Does not build. |
 | [`ecr-build-push`](actions/ecr-build-push) | Build and push an image to ECR tagged by SHA and version; retag instead of rebuilding when the SHA already exists. |
 | [`teams-notify`](actions/teams-notify) | Post a MessageCard to a Teams webhook. `status` colours, facts, a button, `dry-run`. Webhook comes via `env:`. |
+| [`slack-notify`](actions/slack-notify) | Post a Block Kit message to a Slack channel. Same inputs as `teams-notify` plus `channel`, `username`, `icon-emoji`; outputs `ts`. Bot token via `env:`. |
 
 ## Reusable workflows
 

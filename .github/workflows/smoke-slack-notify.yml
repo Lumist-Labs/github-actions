@@ -1,0 +1,120 @@
+name: Smoke — slack-notify
+
+# Dry-run only: posting on every push to a PR would get the channel muted.
+
+on:
+  pull_request:
+    paths:
+      - 'actions/slack-notify/**'
+      - '.github/workflows/smoke-slack-notify.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  payload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Minimal message
+        id: minimal
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: Smoke test
+          text: Minimal payload, no facts and no button.
+          dry-run: 'true'
+
+      - name: Full message
+        id: full
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: 'Deploy "vector" <prod> & friends'
+          text: |
+            Multi-line body with **markdown** and a [link](https://example.com/a?x=1&y=2).
+
+            A < B > C
+          status: warning
+          facts: '[{"name":"k1","value":"1"},{"name":"k2","value":"2"},{"name":"k3","value":"3"},{"name":"k4","value":"4"},{"name":"k5","value":"5"},{"name":"k6","value":"6"},{"name":"k7","value":"7"},{"name":"k8","value":"8"},{"name":"k9","value":"9"},{"name":"k10","value":"10"},{"name":"k11","value":"11"}]'
+          button-url: https://example.com/run/1
+          button-label: Watch run
+          username: Houston · Smoke
+          icon-emoji: ':rocket:'
+          dry-run: 'true'
+
+      - name: Assert payload shape
+        env:
+          MINIMAL: ${{ steps.minimal.outputs.payload }}
+          FULL: ${{ steps.full.outputs.payload }}
+        run: |
+          set -euo pipefail
+
+          printf '%s' "$MINIMAL" | jq -e . >/dev/null
+          printf '%s' "$FULL"    | jq -e . >/dev/null
+
+          printf '%s' "$MINIMAL" | jq -e '.channel == "C0SMOKETEST"' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '.attachments[0].color == "#6957D8"' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '[.attachments[0].blocks[].type] == ["section","context"]' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '(has("username") or has("icon_emoji")) | not' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '.unfurl_links == false' >/dev/null
+
+          printf '%s' "$FULL" | jq -e '.attachments[0].color == "#D29922"' >/dev/null
+          printf '%s' "$FULL" | jq -e '.blocks[0].text.text | contains("\"vector\" <prod>")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.text | contains("&lt;prod&gt; &amp;")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("*markdown*")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("<https://example.com/a?x=1&amp;y=2|link>")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("A &lt; B &gt; C")' >/dev/null
+          printf '%s' "$FULL" | jq -e '[.attachments[0].blocks[] | select(.fields) | .fields | length] == [10,1]' >/dev/null
+          printf '%s' "$FULL" | jq -e '[.attachments[0].blocks[] | select(.type == "actions")][0].elements[0].url == "https://example.com/run/1"' >/dev/null
+          printf '%s' "$FULL" | jq -e '.username == "Houston · Smoke" and .icon_emoji == ":rocket:"' >/dev/null
+
+          echo "Payload shape OK for both messages."
+
+  rejects-bad-input:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Each of these MUST fail; a validator that accepts garbage is worse than none.
+      - name: Invalid status should fail
+        id: bad_status
+        continue-on-error: true
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: t
+          text: x
+          status: not-a-status
+          dry-run: 'true'
+
+      - name: Invalid facts should fail
+        id: bad_facts
+        continue-on-error: true
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: t
+          text: x
+          facts: '{"not":"an array"}'
+          dry-run: 'true'
+
+      - name: Bad token should fail on Slack's ok:false, not pass on HTTP 200
+        id: bad_token
+        continue-on-error: true
+        uses: ./actions/slack-notify
+        env:
+          SLACK_BOT_TOKEN: xoxb-not-a-real-token
+        with:
+          channel: C0SMOKETEST
+          title: t
+          text: x
+
+      - name: Assert all were rejected
+        run: |
+          set -euo pipefail
+          [ "${{ steps.bad_status.outcome }}" = "failure" ] || { echo "invalid status was accepted"; exit 1; }
+          [ "${{ steps.bad_facts.outcome }}"  = "failure" ] || { echo "invalid facts were accepted"; exit 1; }
+          [ "${{ steps.bad_token.outcome }}"  = "failure" ] || { echo "ok:false from Slack was treated as success"; exit 1; }
+          echo "All invalid inputs correctly rejected."
