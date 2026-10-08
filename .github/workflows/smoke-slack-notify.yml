@@ -183,18 +183,3 @@ jobs:
           [ "${{ steps.bad_facts.outcome }}"  = "failure" ] || { echo "invalid facts were accepted"; exit 1; }
           [ "${{ steps.bad_token.outcome }}"  = "failure" ] || { echo "ok:false from Slack was treated as success"; exit 1; }
           echo "All invalid inputs correctly rejected."
-
-  probe-token-scopes:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: read
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          N: ${{ github.event.pull_request.number }}
-        run: |
-          gh pr view "$N" --repo "$GITHUB_REPOSITORY" --json statusCheckRollup --jq '[.statusCheckRollup[] | {name, status, conclusion}]' || echo "rollup failed rc=$?"
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$N/requested_reviewers" || echo "reviewers failed rc=$?"
-          gh pr view "$N" --repo "$GITHUB_REPOSITORY" --json additions,deletions,changedFiles || echo "size failed"
