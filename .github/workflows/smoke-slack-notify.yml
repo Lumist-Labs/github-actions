@@ -23,7 +23,6 @@ jobs:
         with:
           channel: C0SMOKETEST
           title: Smoke test
-          text: Minimal payload, no facts and no button.
           dry-run: 'true'
 
       - name: Full message
@@ -44,33 +43,88 @@ jobs:
           icon-emoji: ':rocket:'
           dry-run: 'true'
 
+      # 120 short lines, one 4000-char word and 1000 `&` (5000 chars once escaped):
+      # forces line packing, a hard split, and a split that must not cut an entity.
+      - name: Build long thread text
+        id: long
+        run: |
+          {
+            echo 'text<<LONG_EOF'
+            for i in $(seq -w 1 120); do echo "- line $i with **bold** and a [link](https://example.com/$i?a=1&b=2)"; done
+            echo
+            head -c 4000 /dev/zero | tr '\0' 'x'; echo
+            head -c 1000 /dev/zero | tr '\0' '&'; echo
+            echo 'LONG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Card with summary, context and thread
+        id: card
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: 'Fix <login> & signup'
+          summary: Adds the **retry** path for expired tokens
+          context: 'Lumist-Labs/vector · [PR #12](https://example.com/pr/12) · develop → main'
+          facts: '[{"name":"Author","value":"dom"},{"name":"Size","value":"+10 −2 · 3 files"}]'
+          button-url: https://example.com/pr/12
+          button-label: Review PR
+          button-style: primary
+          thread-text: ${{ steps.long.outputs.text }}
+          thread-ts: '1700000000.000100'
+          dry-run: 'true'
+
       - name: Assert payload shape
         env:
           MINIMAL: ${{ steps.minimal.outputs.payload }}
+          MINIMAL_REPLIES: ${{ steps.minimal.outputs.thread-payloads }}
           FULL: ${{ steps.full.outputs.payload }}
+          CARD: ${{ steps.card.outputs.payload }}
+          REPLIES: ${{ steps.card.outputs.thread-payloads }}
         run: |
           set -euo pipefail
 
-          printf '%s' "$MINIMAL" | jq -e . >/dev/null
-          printf '%s' "$FULL"    | jq -e . >/dev/null
+          for p in "$MINIMAL" "$FULL" "$CARD" "$REPLIES"; do printf '%s' "$p" | jq -e . >/dev/null; done
 
           printf '%s' "$MINIMAL" | jq -e '.channel == "C0SMOKETEST"' >/dev/null
           printf '%s' "$MINIMAL" | jq -e '.attachments[0].color == "#6957D8"' >/dev/null
-          printf '%s' "$MINIMAL" | jq -e '[.attachments[0].blocks[].type] == ["section","context"]' >/dev/null
-          printf '%s' "$MINIMAL" | jq -e '(has("username") or has("icon_emoji")) | not' >/dev/null
-          printf '%s' "$MINIMAL" | jq -e '.unfurl_links == false' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e 'has("blocks") | not' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '[.attachments[0].blocks[].type] == ["context","section"]' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '.attachments[0].blocks[1] | .text.text == "*Smoke test*" and (has("accessory") | not)' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e --arg repo "$GITHUB_REPOSITORY" --arg run "/actions/runs/$GITHUB_RUN_ID|run #$GITHUB_RUN_NUMBER>" \
+            '.attachments[0].blocks[0].elements[0].text | contains($repo) and contains($run)' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '(has("username") or has("icon_emoji") or has("thread_ts")) | not' >/dev/null
+          printf '%s' "$MINIMAL" | jq -e '.unfurl_links == false and .unfurl_media == false' >/dev/null
+          [ "$MINIMAL_REPLIES" = "[]" ]
 
           printf '%s' "$FULL" | jq -e '.attachments[0].color == "#D29922"' >/dev/null
-          printf '%s' "$FULL" | jq -e '.blocks[0].text.text | contains("\"vector\" <prod>")' >/dev/null
           printf '%s' "$FULL" | jq -e '.text | contains("&lt;prod&gt; &amp;")' >/dev/null
-          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("*markdown*")' >/dev/null
-          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("<https://example.com/a?x=1&amp;y=2|link>")' >/dev/null
-          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[0].text.text | contains("A &lt; B &gt; C")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[1].text.text == "*<https://example.com/run/1|Deploy \"vector\" &lt;prod&gt; &amp; friends>*"' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[1].accessory | .url == "https://example.com/run/1" and .text.text == "Watch run" and (has("style") | not)' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[2].text.text | contains("*markdown*")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[2].text.text | contains("<https://example.com/a?x=1&amp;y=2|link>")' >/dev/null
+          printf '%s' "$FULL" | jq -e '.attachments[0].blocks[2].text.text | contains("A &lt; B &gt; C")' >/dev/null
           printf '%s' "$FULL" | jq -e '[.attachments[0].blocks[] | select(.fields) | .fields | length] == [10,1]' >/dev/null
-          printf '%s' "$FULL" | jq -e '[.attachments[0].blocks[] | select(.type == "actions")][0].elements[0].url == "https://example.com/run/1"' >/dev/null
+          printf '%s' "$FULL" | jq -e '[.attachments[0].blocks[] | select(.type == "actions")] == []' >/dev/null
           printf '%s' "$FULL" | jq -e '.username == "Houston · Smoke" and .icon_emoji == ":rocket:"' >/dev/null
 
-          echo "Payload shape OK for both messages."
+          printf '%s' "$CARD" | jq -e '[.attachments[0].blocks[].type] == ["context","section","section"]' >/dev/null
+          printf '%s' "$CARD" | jq -e '.attachments[0].blocks[0].elements[0].text == "Lumist-Labs/vector · <https://example.com/pr/12|PR #12> · develop → main"' >/dev/null
+          printf '%s' "$CARD" | jq -e '.attachments[0].blocks[1].text.text == "*<https://example.com/pr/12|Fix &lt;login&gt; &amp; signup>*\nAdds the *retry* path for expired tokens"' >/dev/null
+          printf '%s' "$CARD" | jq -e '.attachments[0].blocks[1].accessory.style == "primary"' >/dev/null
+          printf '%s' "$CARD" | jq -e '.text == "Fix &lt;login&gt; &amp; signup" and .thread_ts == "1700000000.000100"' >/dev/null
+
+          # Chunked, never truncated: every section under Slack's 3000 cap, every line and
+          # every character accounted for, no entity cut between two replies.
+          printf '%s' "$REPLIES" | jq -e 'length >= 4' >/dev/null
+          printf '%s' "$REPLIES" | jq -e 'all(.[]; (.blocks[0].text.text | length) <= 2900 and .blocks[0].text.text == .text)' >/dev/null
+          printf '%s' "$REPLIES" | jq -e 'all(.[]; has("thread_ts") | not)' >/dev/null
+          printf '%s' "$REPLIES" | jq -e '[.[].text | scan("line [0-9]+")] | unique | length == 120' >/dev/null
+          printf '%s' "$REPLIES" | jq -e '[.[].text | scan("x")] | length == 4120' >/dev/null
+          printf '%s' "$REPLIES" | jq -e '[.[].text | scan("&amp;")] | length == 1120' >/dev/null
+          printf '%s' "$REPLIES" | jq -e 'all(.[]; .text | gsub("&(amp|lt|gt);"; "") | test("&") | not)' >/dev/null
+          printf '%s' "$REPLIES" | jq -e '.[0].text | contains("*bold*") and contains("<https://example.com/001?a=1&amp;b=2|link>")' >/dev/null
+
+          echo "Payload shape OK for all three messages; thread text split into $(printf '%s' "$REPLIES" | jq length) replies."
 
   rejects-bad-input:
     runs-on: ubuntu-latest
@@ -87,6 +141,16 @@ jobs:
           title: t
           text: x
           status: not-a-status
+          dry-run: 'true'
+
+      - name: Invalid button-style should fail
+        id: bad_style
+        continue-on-error: true
+        uses: ./actions/slack-notify
+        with:
+          channel: C0SMOKETEST
+          title: t
+          button-style: green
           dry-run: 'true'
 
       - name: Invalid facts should fail
@@ -115,6 +179,7 @@ jobs:
         run: |
           set -euo pipefail
           [ "${{ steps.bad_status.outcome }}" = "failure" ] || { echo "invalid status was accepted"; exit 1; }
+          [ "${{ steps.bad_style.outcome }}"  = "failure" ] || { echo "invalid button-style was accepted"; exit 1; }
           [ "${{ steps.bad_facts.outcome }}"  = "failure" ] || { echo "invalid facts were accepted"; exit 1; }
           [ "${{ steps.bad_token.outcome }}"  = "failure" ] || { echo "ok:false from Slack was treated as success"; exit 1; }
           echo "All invalid inputs correctly rejected."

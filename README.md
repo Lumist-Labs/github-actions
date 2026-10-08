@@ -16,7 +16,7 @@ that still call them. Consumers pin `@v2`. Working in this repo: start at
 | [`aws-deploy-core`](actions/aws-deploy-core) | Assume an AWS role via OIDC, resolve names from SSM, deploy, wait until live. Targets `s3-cloudfront`, `ec2-compose`, `ecs-service`. Does not build. |
 | [`ecr-build-push`](actions/ecr-build-push) | Build and push an image to ECR tagged by SHA and version; retag instead of rebuilding when the SHA already exists. |
 | [`teams-notify`](actions/teams-notify) | Post a MessageCard to a Teams webhook. `status` colours, facts, a button, `dry-run`. Webhook comes via `env:`. |
-| [`slack-notify`](actions/slack-notify) | Post a Block Kit message to a Slack channel. Same inputs as `teams-notify` plus `channel`, `username`, `icon-emoji`; outputs `ts`. Bot token via `env:`. |
+| [`slack-notify`](actions/slack-notify) | Post a Block Kit card to a Slack channel, long detail as thread replies. `teams-notify` inputs plus `channel`, `summary`, `context`, `button-style`, `thread-text`, `thread-ts`, `username`, `icon-emoji`; outputs `ts`. Bot token via `env:`. |
 
 ## Reusable workflows
 
@@ -29,7 +29,7 @@ file's `inputs:` block and header comment are the contract.
 | [`rollback-vps-shared.yml`](.github/workflows/rollback-vps-shared.yml) | Redeploy a previous tag, optionally restoring the latest pre-deploy DB snapshot (`confirm: RESTORE-DB`). |
 | [`copy-prod-db-shared.yml`](.github/workflows/copy-prod-db-shared.yml) | Copy the prod DB over dev on the same VPS. Prod is read-only; needs `confirm: CLOBBER-DEV`. |
 | [`release-shared.yml`](.github/workflows/release-shared.yml) | semantic-release on `main`, then dispatch the caller's deploy workflow. `ci-gated: true` tags only a CI-passed SHA. |
-| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. PRs into `main`/`master`: Claude summary into the body, `Closes #N`, request `core` review, Teams card, Slack post to `#devs-prs`. |
+| [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. PRs into `main`/`master`: Claude summary into the body, `Closes #N`, request `core` review, Teams card, Slack card to `#devs-prs` with the full summary in its thread. |
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Triage new issues and `@claude` comments with Claude Code. Callers pass no inputs; see [zero-config shim](#zero-config-consumer-shim). |
 | [`claude-issue-autopilot.yml`](.github/workflows/claude-issue-autopilot.yml) | Beacon-dispatched: score one issue and, if it passes the gate, implement it as a draft PR. See [`docs/runbooks/issue-autopilot.md`](docs/runbooks/issue-autopilot.md). |
 

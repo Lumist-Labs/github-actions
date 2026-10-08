@@ -11,7 +11,8 @@ name: PR hooks (shared)
 #   3. Generate a Markdown summary via Claude
 #   4. Update the PR body with the summary + Closes #N footers
 #   5. Request review from the `core` team
-#   6. Post a Teams card and a Slack message (#devs-prs) with the latest body
+#   6. Post a Teams card and a Slack card (#devs-prs) with the latest body;
+#      the Slack card threads the full AI summary
 #      (opened / ready_for_review only)
 #
 # Each consumer's `.github/workflows/pr-to-main-hooks.yml` becomes a thin
@@ -702,32 +703,83 @@ jobs:
               | sed -E '/<!--[[:space:]]*auto-(closes|summary)[[:space:]]*-->/,/<!--[[:space:]]*\/auto-(closes|summary)[[:space:]]*-->/d')
           fi
 
-          # Trim leading/trailing whitespace, then truncate.
-          DESC=$(printf '%s' "$DESC" | awk 'NF { p=1 } p' | sed -e 's/[[:space:]]*$//')
-          if [ -z "$DESC" ]; then
+          # Trim leading/trailing whitespace. Slack threads the whole thing; Teams gets 500 chars.
+          FULL=$(printf '%s' "$DESC" | awk 'NF { p=1 } p' | sed -e 's/[[:space:]]*$//')
+          if [ -z "$FULL" ]; then
             DESC="_(no description)_"
-          elif [ "${#DESC}" -gt 500 ]; then
-            DESC="${DESC:0:500}…"
+          elif [ "${#FULL}" -gt 500 ]; then
+            DESC="${FULL:0:500}…"
+          else
+            DESC="$FULL"
           fi
+
+          # The card's one sentence: the first bullet or line that isn't a bold heading.
+          SUMMARY=$(printf '%s\n' "$DESC" \
+            | grep -vE '^[[:space:]]*(\*\*[^*]+\*\*)?[[:space:]]*$' \
+            | head -1 \
+            | sed -E 's/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+//' || true)
 
           printf '%s' "$BODY" > /tmp/card-body.txt
           printf '%s' "$DESC" > /tmp/card-desc.txt
 
-          # The event payload's title predates the retitle step above.
-          TITLE=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json title -q '.title')
+          # The event payload's title and size predate the retitle step and later pushes.
+          gh pr view "$PR_NUMBER" --repo "$REPO" --json title,additions,deletions,changedFiles > /tmp/card-pr.json
+          TITLE=$(jq -r '.title' /tmp/card-pr.json)
+          SIZE=$(jq -r '"+\(.additions) −\(.deletions) · \(.changedFiles) file\(if .changedFiles == 1 then "" else "s" end)"' /tmp/card-pr.json)
+
+          # This job's own check run is always in progress here, so leave it out or every
+          # card says "pending" because of us. The caller's job prefix varies: `hooks / link-issues`.
+          if gh pr view "$PR_NUMBER" --repo "$REPO" --json statusCheckRollup > /tmp/card-checks.json 2> /tmp/card-checks.err; then
+            CHECKS=$(jq -r '
+              [ .statusCheckRollup[]
+                | select((.name // "") | test("(^| / )link-issues$") | not)
+                | if .__typename == "CheckRun" then
+                    if .status != "COMPLETED" then "pending"
+                    elif (.conclusion | IN("FAILURE","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE")) then "failing"
+                    else "ok" end
+                  else
+                    if (.state | IN("PENDING","EXPECTED")) then "pending"
+                    elif (.state | IN("FAILURE","ERROR")) then "failing"
+                    else "ok" end
+                  end ] as $s
+              | ($s | length) as $n
+              | ($s | map(select(. == "failing")) | length) as $f
+              | ($s | map(select(. == "pending")) | length) as $p
+              | if $n == 0 then "none reported yet"
+                elif $f > 0 then "failing · \($f) of \($n)"
+                elif $p > 0 then "pending · \($n - $p) of \($n) done"
+                else "passing · \($n)" end' /tmp/card-checks.json)
+          else
+            echo "::warning::Could not read checks for the Slack card: $(head -c 300 /tmp/card-checks.err)"
+            CHECKS="unavailable"
+          fi
+
+          if gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" > /tmp/card-reviewers.json 2> /tmp/card-reviewers.err; then
+            REVIEWERS=$(jq -r '[.users[].login] + [.teams[] | "\(.slug) (team)"] | if length == 0 then "none requested" else join(", ") end' /tmp/card-reviewers.json)
+          else
+            echo "::warning::Could not read requested reviewers for the Slack card: $(head -c 300 /tmp/card-reviewers.err)"
+            REVIEWERS="unavailable"
+          fi
 
           # PR text reaches slack-notify only as an action input, which it reads
           # from env, never a `run:`. Random delimiter so a body can't end the block.
+          # Branch names are backticked so a branch called `[x](url)` isn't turned into a link.
           DELIM="DESC_$(openssl rand -hex 16)"
           {
-            echo "desc<<${DELIM}"
-            printf '%s\n' "$DESC"
-            echo "$DELIM"
             echo "title<<${DELIM}"
             printf '%s\n' "$TITLE"
             echo "$DELIM"
-            echo "facts=$(jq -cn --arg repo "$REPO" --arg author "$PR_AUTHOR" --arg branches "${PR_BASE} ← ${PR_HEAD}" \
-              '[{name:"Repo",value:$repo},{name:"Author",value:$author},{name:"Branches",value:$branches}]')"
+            echo "summary<<${DELIM}"
+            printf '%s\n' "$SUMMARY"
+            echo "$DELIM"
+            echo "thread<<${DELIM}"
+            printf '%s\n' "$FULL"
+            echo "$DELIM"
+            echo "context<<${DELIM}"
+            printf '%s · PR #%s · `%s` → `%s`\n' "$REPO" "$PR_NUMBER" "$PR_HEAD" "$PR_BASE"
+            echo "$DELIM"
+            echo "facts=$(jq -cn --arg author "$PR_AUTHOR" --arg size "$SIZE" --arg checks "$CHECKS" --arg reviewers "$REVIEWERS" \
+              '[{name:"Author",value:$author},{name:"Size",value:$size},{name:"Checks",value:$checks},{name:"Reviewers",value:$reviewers}]')"
           } >> "$GITHUB_OUTPUT"
 
           # Mirrors the Teams webhook check: no token is a skipped post, not a failed job.
@@ -837,8 +889,11 @@ jobs:
           channel: ${{ env.SLACK_CHANNEL_DEVS_PRS }}
           username: Houston · PRs
           icon-emoji: ':twisted_rightwards_arrows:'
+          context: ${{ steps.card.outputs.context }}
           title: ${{ steps.card.outputs.title }}
-          text: ${{ steps.card.outputs.desc }}
+          summary: ${{ steps.card.outputs.summary }}
           facts: ${{ steps.card.outputs.facts }}
           button-url: ${{ github.event.pull_request.html_url }}
-          button-label: View PR
+          button-label: Review PR
+          button-style: primary
+          thread-text: ${{ steps.card.outputs.thread }}

@@ -1,10 +1,11 @@
 # `slack-notify`
 
-Post a Block Kit message to a Slack channel with `chat.postMessage`.
+Post a Block Kit card to a Slack channel with `chat.postMessage`, optionally followed by
+the long version as replies in the card's thread.
 
 The Slack counterpart of [`teams-notify`](../teams-notify). It takes the same `title` / `text` / `status` /
 `facts` / `button-*` inputs, so moving a caller over means changing `uses:`, the token env
-var, and adding `channel`.
+var, and adding `channel`. Layout follows the org Slack style: card = summary, thread = everything.
 
 ## Usage
 
@@ -36,11 +37,12 @@ var, and adding `channel`.
     username: Houston · Deploys
     icon-emoji: ':rocket:'
     title: vector deployed to prod
+    summary: Migrations applied, health check green.
     status: success
-    text: Migrations applied, health check green.
     facts: '[{"name":"Version","value":"v1.4.0"},{"name":"Took","value":"4m"}]'
     button-url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     button-label: View run
+    thread-text: ${{ steps.migrate.outputs.log-tail }}   # optional; goes in the card's thread
 ```
 
 ## Inputs
@@ -48,22 +50,28 @@ var, and adding `channel`.
 | Input | Required | Default | Description |
 |---|:---:|---|---|
 | `channel` | yes | — | Channel **ID** (`C…`), not `#name`. Survives renames. |
-| `title` | yes | — | Header, and the notification preview. Clipped at 150 chars. |
-| `text` | yes | — | Body, Slack mrkdwn. `**bold**` and `[label](url)` are converted. Clipped at 3000 chars. |
+| `title` | yes | — | Bold title, linked to `button-url` when set, and the notification preview. Clipped at 150 chars. |
+| `summary` | no | `''` | One sentence under the title. Converted like `text`. Clipped at 2000 chars. |
+| `context` | no | repo · run · branch · actor | Small grey line above the title, Slack mrkdwn (`[label](url)` converted). |
+| `text` | no | `''` | Body under the title, Slack mrkdwn. `**bold**` and `[label](url)` are converted. Clipped at 3000 chars. Prefer `summary` + `thread-text`. |
 | `status` | no | `info` | `info` / `success` / `warning` / `failure`. Sets the colour bar. Invalid values fail the step. |
-| `facts` | no | `[]` | JSON array of `{"name","value"}`, rendered as a two-column grid, 10 per section. Must be an array. |
-| `button-url` | no | `''` | Adds a link button. |
-| `button-label` | no | `View` | Button label. |
+| `facts` | no | `[]` | JSON array of `{"name","value"}`, rendered as a two-column grid, 10 per section. Must be an array. Keep values short; no prose. |
+| `button-url` | no | `''` | Adds a link button beside the title. |
+| `button-label` | no | `View` | Button label. Clipped at 75 chars. |
+| `button-style` | no | `''` | `primary` (green), `danger` (red), or empty for the default. Invalid values fail the step. |
+| `thread-text` | no | `''` | Posted as replies in the card's thread right after the card. Converted like `text`. Split on line boundaries into ≤ 2900-char replies, never truncated. |
+| `thread-ts` | no | `''` | `ts` of an existing message. The card, and any `thread-text` replies, go in that message's thread. |
 | `username` | no | `''` | Sender name for this message, e.g. `Houston · Deploys`. Needs `chat:write.customize`. |
 | `icon-emoji` | no | `''` | Sender icon, e.g. `:rocket:`. Needs `chat:write.customize`. |
-| `dry-run` | no | `false` | Build and print the payload without posting. |
+| `dry-run` | no | `false` | Build and print the payloads without posting. |
 
 ## Outputs
 
 | Output | Description |
 |---|---|
-| `payload` | The JSON payload sent (or that would have been sent under `dry-run`). |
-| `ts` | Timestamp of the posted message. Use it as `thread_ts` to reply in thread, or with `chat.update`. Empty under `dry-run`. |
+| `payload` | The card's JSON payload (sent, or that would have been sent under `dry-run`). |
+| `thread-payloads` | JSON array of the `thread-text` reply payloads, `[]` without it. `thread_ts` is added at post time, so it is absent here. |
+| `ts` | Timestamp of the posted card. Pass it as another call's `thread-ts`, or use it with `chat.update`. Empty under `dry-run`. |
 
 ## Required env
 
@@ -77,14 +85,16 @@ var, and adding `channel`.
 
 ## Message layout
 
-- **Header**: `title`.
-- **Colour bar** (legacy attachment colour; Block Kit has no accent of its own) beside:
-  - `text`
-  - `facts` grid
-  - button
-  - footer: repo (linked to the run) · short SHA · actor
+One attachment, coloured by `status` (a legacy attachment colour is Slack's only accent):
 
-Link unfurling is off, so a GitHub URL in the body doesn't expand into a preview that buries the message.
+- context: `context`, or repo · run · branch · actor, each linked where it can be
+- **title** (linked to `button-url`) with `summary` under it and the button on the right
+- `text`, when given
+- `facts` grid
+
+`text` fallback (notifications, screen readers) is the title. With `thread-text`, the
+replies follow immediately in the card's thread, one section each. Link unfurling is off
+on every message, so a GitHub URL doesn't expand into a preview that buries the card.
 
 ## Status colours
 
@@ -102,6 +112,10 @@ token, an unknown channel or a missing scope, with the reason in the body. The a
 checks `ok` and fails with Slack's `error` string (`invalid_auth`, `channel_not_found`,
 `not_in_channel`, `missing_scope`). This keeps `teams-notify`'s contract that a broken
 notifier is a red run, not a silence.
+
+**Replies fail the step too.** The card's `ts` is written before the replies post, so a
+failed reply leaves the output set and the step red. Long `thread-text` is still bounded by
+the runner's per-variable env limit (~128 KB); write anything bigger to a file and link it.
 
 **Link buttons still send a click event** to the Slack app. Until the app has a listener,
 Slack may show a small warning icon after a click. The link itself opens fine.
