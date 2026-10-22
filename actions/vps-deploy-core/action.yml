@@ -704,10 +704,11 @@ runs:
           # The image may run as a uid other than the deploy user's.
           chmod 644 "$CONFIG_JSON"
 
-          read -ra CMD <<< "$PREFLIGHT_COMMAND"
+          # The VPS login shell can be zsh (lumios dev), which has no `read -a`
+          # and does not word-split "$VAR"; the image's sh splits the command.
           docker run --rm --network none \
             -v "$CONFIG_JSON:/preflight/config.json:ro" \
-            "$IMAGE" "${CMD[@]}" /preflight/config.json
+            "$IMAGE" sh -c "$PREFLIGHT_COMMAND /preflight/config.json"
 
     # ── 5. Pre-deploy DB backup ───────────────────────────────────────────────
     # First-class pre-deploy DB backup. Runs before compose recreates containers
