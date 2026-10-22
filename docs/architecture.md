@@ -66,7 +66,10 @@ group on the target, `vps-<caller repo>-<vps-user>-<repo-dir>`, overridable by
 5. `tailscale-connect`.
 6. On the VPS: fetch and check out `ref` in `repo-dir` (https remotes use the job token
    via `github-token`); clone only if `allow-clone: true`.
-7. Write the env file (base64 through `appleboy/ssh-action` `envs`).
+7. Write the env file (base64 through `appleboy/ssh-action` `envs`). Then, when
+   `preflight-command` is set, build or pull `preflight-service` and run the command in
+   that image against the merged `compose config` JSON, with no network; non-zero fails
+   the deploy before any container is replaced.
 8. Pre-deploy DB snapshot when `db-type` is `sqlite` or `postgres` and `skip-pre-deploy`
    is false.
 9. Optional `pre-compose-up-script` (rollback's DB restore).
@@ -80,7 +83,7 @@ Full descriptions live in each workflow's `inputs:` block.
 
 | Workflow | Required | Notable optional |
 |---|---|---|
-| `deploy-vps-shared` | `environment`, `infisical-identity-id`, `shared-project-slug`, `app-project-slug`, `env-slug`, `app-path`, `vps-user`, `repo-dir`, `compose-file` | `ref` (`main`), `allow-clone` (false), `healthcheck-containers`, `required-keys`, `deploy-command`, `post-deploy-command`, `extra-{shared,app}-path-1..3`, `db-*`, `compose-build` (true), `compose-up-timeout` (30m), `runner` |
+| `deploy-vps-shared` | `environment`, `infisical-identity-id`, `shared-project-slug`, `app-project-slug`, `env-slug`, `app-path`, `vps-user`, `repo-dir`, `compose-file` | `ref` (`main`), `allow-clone` (false), `healthcheck-containers`, `required-keys`, `preflight-command` + `preflight-service`, `deploy-command`, `post-deploy-command`, `extra-{shared,app}-path-1..3`, `db-*`, `compose-build` (true), `compose-up-timeout` (30m), `runner` |
 | `rollback-vps-shared` | the deploy set plus `version`, `healthcheck-containers` | `restore-db-snapshot` + `confirm: RESTORE-DB`, `db-*`, `snapshot-dir` |
 | `copy-prod-db-shared` | `environment`, `confirm: CLOBBER-DEV`, `infisical-identity-id`, `shared-project-slug`, `env-slug`, `vps-user`, `repo-dir`, `db-type`, `dev-compose-file` | `prod-/dev-db-container`, `prod-/dev-db-path` (sqlite), `db-name`/`prod-db-name`/`dev-db-name`, `db-user` (postgres), `dev-app-container`, `dev-healthcheck-containers`, `dev-backup-dir` |
 | `release-shared` | — | `ci-gated` (false), `deploy-workflow` (`deploy-prod.yml`, `''` skips), `major`, `node-version` (22), `runner` |

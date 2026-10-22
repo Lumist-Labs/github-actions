@@ -15,6 +15,8 @@ name: Deploy to VPS (shared)
 #   4. Write the rendered env file to the VPS over ssh (base64 via ssh-action).
 #   5. allow-clone gate: dev may clone; prod refuses clone (requires existing
 #      checkout on the VPS).
+#   5b. preflight-command, when set, runs in the release image against the merged
+#      compose config before `up` (see the input).
 #   6. docker compose --env-file <env-file-name> up -d (--build unless
 #      compose-build is false), or
 #      deploy-command instead for an app that deploys itself.
@@ -264,6 +266,28 @@ on:
         type: string
         default: ''
 
+      preflight-command:
+        description: >-
+          Command run in the release image against the merged `docker compose
+          config` BEFORE containers are replaced; a non-zero exit fails the deploy
+          while the old containers still serve. The config (JSON, holds secrets) is
+          mounted read-only at `/preflight/config.json`, which is appended as the
+          command's last argument, and the container has no network. For an app to
+          load its own Settings, e.g. `python -m scripts.check_settings`. Needs
+          `preflight-service`. Empty (default) = no preflight.
+        required: false
+        type: string
+        default: ''
+
+      preflight-service:
+        description: >-
+          Compose service whose image runs `preflight-command`. It is built
+          (`compose-build` true) or pulled first, so the image is the one `up`
+          starts. Required when `preflight-command` is set.
+        required: false
+        type: string
+        default: ''
+
       compose-force-recreate:
         description: >-
           `true` — pass `--force-recreate` to `compose up`. Avoids a race where
@@ -475,6 +499,8 @@ jobs:
           deploy-command: ${{ inputs.deploy-command }}
           post-deploy-command: ${{ inputs.post-deploy-command }}
           required-keys: ${{ inputs.required-keys }}
+          preflight-command: ${{ inputs.preflight-command }}
+          preflight-service: ${{ inputs.preflight-service }}
           compose-force-recreate: ${{ inputs.compose-force-recreate }}
           db-type: ${{ inputs.db-type }}
           db-container: ${{ inputs.db-container }}
