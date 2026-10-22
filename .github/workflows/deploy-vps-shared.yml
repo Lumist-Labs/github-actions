@@ -272,7 +272,7 @@ on:
           config` BEFORE containers are replaced; a non-zero exit fails the deploy
           while the old containers still serve. The config (JSON, holds secrets) is
           mounted read-only at `/preflight/config.json`, which is appended as the
-          command's last argument, and the container has no network. For an app to
+          command's last argument; it runs via `compose run --no-deps`. For an app to
           load its own Settings, e.g. `python -m scripts.check_settings`. Needs
           `preflight-service`. Empty (default) = no preflight.
         required: false
