@@ -49,6 +49,8 @@ repo, keeping the scheme, when its owner/name differs.
 | `compose-build` | no | `true` | `up -d --build`; `false` pulls instead |
 | `compose-up-timeout` | no | `30m` | Must outlast a cold build on the VPS |
 | `compose-force-recreate` | no | `false` | For fixed `container_name`s that come back hash-prefixed |
+| `preflight-command` | no | `''` | Run in the `preflight-service` image against the merged `compose config` JSON (mounted at `/preflight/config.json`, appended as the last arg, no network) before compose up. Non-zero fails the deploy |
+| `preflight-service` | with the above | `''` | Compose service whose image runs it; built or pulled first |
 | `pre-compose-up-script` | no | `''` | Bash run after the `.env` write, before compose up. Rollback's DB restore goes here |
 
 **Pre-deploy DB snapshot**

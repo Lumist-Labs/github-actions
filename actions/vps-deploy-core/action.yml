@@ -241,6 +241,26 @@ inputs:
     required: false
     default: ''
 
+  preflight-command:
+    description: >-
+      Optional command run in the release image against the merged
+      `docker compose config` before containers are replaced. The config is
+      rendered as JSON (it holds secrets) and mounted read-only at
+      /preflight/config.json; that path is appended as the command's last argument,
+      e.g. `python -m scripts.check_settings`. The container has no network. A
+      non-zero exit fails the deploy before `compose up`. Needs preflight-service.
+      Empty (default) = no preflight.
+    required: false
+    default: ''
+
+  preflight-service:
+    description: >-
+      Compose service whose image runs preflight-command. Built (compose-build
+      true) or pulled first, so it is the image `compose up` will start. Required
+      when preflight-command is set.
+    required: false
+    default: ''
+
   pre-compose-up-script:
     description: >-
       Optional bash script run on the VPS after the env file is written (and the
@@ -274,6 +294,13 @@ runs:
       shell: bash
       run: |
         echo "::error::Set healthcheck-containers, or a deploy-command that health-checks itself." >&2
+        exit 1
+
+    - name: Check preflight inputs
+      if: ${{ inputs.preflight-command != '' && inputs.preflight-service == '' }}
+      shell: bash
+      run: |
+        echo "::error::preflight-command needs preflight-service, the compose service whose image runs it." >&2
         exit 1
 
     # ── 1. Render app dotenv ─────────────────────────────────────────────────
@@ -638,6 +665,49 @@ runs:
             exit 1
           fi
           echo "Wrote $TARGET ($(grep -c '=' "$TARGET") vars)."
+
+    # Runs the app's own config check in the release image, from the merged compose
+    # config, while the old containers still serve. The config JSON holds secrets:
+    # 0600 until the container needs it, always deleted on exit.
+    - name: Preflight in the release image
+      if: ${{ inputs.preflight-command != '' }}
+      uses: appleboy/ssh-action@v1.2.0
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+        ENV_FILE_NAME: ${{ inputs.env-file-name }}
+        COMPOSE_BUILD: ${{ inputs.compose-build }}
+        PREFLIGHT_SERVICE: ${{ inputs.preflight-service }}
+        PREFLIGHT_COMMAND: ${{ inputs.preflight-command }}
+      with:
+        host: ${{ env.VPS_TAILSCALE_IP }}
+        username: ${{ inputs.vps-user }}
+        key: ${{ env.VPS_SSH_KEY }}
+        envs: REPO_DIR,COMPOSE_FILE,ENV_FILE_NAME,COMPOSE_BUILD,PREFLIGHT_SERVICE,PREFLIGHT_COMMAND
+        command_timeout: ${{ inputs.compose-up-timeout }}
+        script: |
+          set -euo pipefail
+          cd "$REPO_DIR"
+          COMPOSE=(docker compose --env-file "$ENV_FILE_NAME" -f "$COMPOSE_FILE")
+
+          # Same image `compose up` starts; the later `up --build` hits the layer cache.
+          if [[ "$COMPOSE_BUILD" == "true" ]]; then
+            "${COMPOSE[@]}" build "$PREFLIGHT_SERVICE"
+          else
+            "${COMPOSE[@]}" pull "$PREFLIGHT_SERVICE"
+          fi
+          IMAGE=$("${COMPOSE[@]}" config --images "$PREFLIGHT_SERVICE")
+
+          CONFIG_JSON=$(mktemp)
+          trap 'rm -f "$CONFIG_JSON"' EXIT
+          "${COMPOSE[@]}" config --format json > "$CONFIG_JSON"
+          # The image may run as a uid other than the deploy user's.
+          chmod 644 "$CONFIG_JSON"
+
+          read -ra CMD <<< "$PREFLIGHT_COMMAND"
+          docker run --rm --network none \
+            -v "$CONFIG_JSON:/preflight/config.json:ro" \
+            "$IMAGE" "${CMD[@]}" /preflight/config.json
 
     # ── 5. Pre-deploy DB backup ───────────────────────────────────────────────
     # First-class pre-deploy DB backup. Runs before compose recreates containers
