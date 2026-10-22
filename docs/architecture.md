@@ -68,7 +68,7 @@ group on the target, `vps-<caller repo>-<vps-user>-<repo-dir>`, overridable by
    via `github-token`); clone only if `allow-clone: true`.
 7. Write the env file (base64 through `appleboy/ssh-action` `envs`). Then, when
    `preflight-command` is set, build or pull `preflight-service` and run the command in
-   that image against the merged `compose config` JSON, with no network; non-zero fails
+   that image against the merged `compose config` JSON via `compose run --no-deps`; non-zero fails
    the deploy before any container is replaced.
 8. Pre-deploy DB snapshot when `db-type` is `sqlite` or `postgres` and `skip-pre-deploy`
    is false.

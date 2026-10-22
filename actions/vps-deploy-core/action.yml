@@ -247,7 +247,7 @@ inputs:
       `docker compose config` before containers are replaced. The config is
       rendered as JSON (it holds secrets) and mounted read-only at
       /preflight/config.json; that path is appended as the command's last argument,
-      e.g. `python -m scripts.check_settings`. The container has no network. A
+      e.g. `python -m scripts.check_settings`. It runs via `compose run --no-deps` on the service. A
       non-zero exit fails the deploy before `compose up`. Needs preflight-service.
       Empty (default) = no preflight.
     required: false
@@ -696,7 +696,6 @@ runs:
           else
             "${COMPOSE[@]}" pull "$PREFLIGHT_SERVICE"
           fi
-          IMAGE=$("${COMPOSE[@]}" config --images "$PREFLIGHT_SERVICE")
 
           CONFIG_JSON=$(mktemp)
           trap 'rm -f "$CONFIG_JSON"' EXIT
@@ -704,11 +703,12 @@ runs:
           # The image may run as a uid other than the deploy user's.
           chmod 644 "$CONFIG_JSON"
 
-          # The VPS login shell can be zsh (lumios dev), which has no `read -a`
-          # and does not word-split "$VAR"; the image's sh splits the command.
-          docker run --rm --network none \
+          # compose run, because `config --images` gave docker run an invalid image ref on lumios dev.
+          # sh -c, because a zsh login shell has no `read -a` and does not word-split "$VAR".
+          "${COMPOSE[@]}" run --rm --no-deps -T \
             -v "$CONFIG_JSON:/preflight/config.json:ro" \
-            "$IMAGE" sh -c "$PREFLIGHT_COMMAND /preflight/config.json"
+            --entrypoint sh "$PREFLIGHT_SERVICE" \
+            -c "$PREFLIGHT_COMMAND /preflight/config.json"
 
     # ── 5. Pre-deploy DB backup ───────────────────────────────────────────────
     # First-class pre-deploy DB backup. Runs before compose recreates containers
