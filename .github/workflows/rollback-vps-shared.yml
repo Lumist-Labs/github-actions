@@ -281,7 +281,10 @@ on:
 # already wrong, so it is the last thing that should be cancelled or raced.
 # Scoped by environment so a dev rollback never queues behind a prod one.
 concurrency:
-  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ github.ref }}
+  # repo-dir: a caller fanning out over instances in one matrix runs several calls with
+  # the same workflow, environment and ref, which would otherwise share one group and
+  # keep only one pending run -- silently dropping an instance's deploy.
+  group: ${{ github.workflow }}-${{ inputs.environment }}-${{ inputs.repo-dir }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
