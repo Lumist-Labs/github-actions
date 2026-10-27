@@ -99,6 +99,16 @@ dispatches `deploy-workflow` on `main` with `version=<new tag>`. With `ci-gated:
 the caller triggers it from CI's `workflow_run`, and it refuses to tag a SHA CI didn't
 test.
 
+Before running semantic-release it injects a `releaseBodyTemplate` into the caller's
+`@semantic-release/github` plugin config (unless the caller already set one), capping
+the GitHub Release body at 120,000 characters -- GitHub's Releases API rejects bodies
+over 125,000. The deploy dispatch itself reads the tag from `git describe`, not from
+`gh release view`: semantic-release's core creates and pushes the `vX.Y.Z` tag before
+any publish plugin runs, so a `publish` failure (GitHub Release creation, npm, etc.)
+still leaves a real tag to deploy. The `npx semantic-release` step runs with
+`continue-on-error: true` for exactly this reason; a dedicated step fails the job
+afterward if it did fail, so the run still shows red without blocking the dispatch.
+
 ## Prod-deployer gate
 
 `deploy-vps-shared`, `rollback-vps-shared` and `copy-prod-db-shared` run
