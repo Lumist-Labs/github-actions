@@ -223,41 +223,148 @@ jobs:
           fi
           push_trigger
 
-      - name: Get current latest tag
+      - name: Get current tags at HEAD
+        # Snapshot by tag *name*, not `git describe` (which walks ancestry
+        # and can report an unrelated older tag reachable from HEAD even
+        # when nothing new was tagged). Comparing points-at-HEAD tag sets
+        # before/after this job identifies a genuinely new tag even if a
+        # stray tag happens to already point at the pre-run HEAD.
         if: steps.promote.outputs.deferred != 'true'
         id: before
-        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo none)" >> "$GITHUB_OUTPUT"
+        run: echo "tags=$(git tag --points-at HEAD | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
       - name: Run semantic-release
+        id: semrel
+        # A GitHub Release publish failure (e.g. the release-notes cap below
+        # still being exceeded, or a transient API error) must not stop this
+        # job before the deploy dispatch further down: semantic-release's
+        # core creates and pushes the vX.Y.Z tag before any publish plugin
+        # runs, so the tag (and thus the release this push earned) already
+        # exists even when `npx semantic-release` exits non-zero. See #854.
+        continue-on-error: true
         if: steps.promote.outputs.deferred != 'true'
         env:
           CI_GATED: ${{ inputs.ci-gated }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # @semantic-release/git would commit (and tag) an untested CHANGELOG commit.
-          if [[ "$CI_GATED" == "true" ]]; then
-            jq '.plugins |= map(select((if type == "array" then .[0] else . end)
-              | IN("@semantic-release/changelog", "@semantic-release/git") | not))' \
-              .releaserc.json > "$RUNNER_TEMP/releaserc.json"
-            cp "$RUNNER_TEMP/releaserc.json" .releaserc.json
+          # Single config rewrite: strip changelog/git for ci-gated releases
+          # (an untested CHANGELOG commit would otherwise get tagged), and
+          # cap @semantic-release/github's release body at 120,000 characters
+          # -- GitHub's Releases API rejects bodies over 125,000, which bit
+          # us on a first-ever-release-style push with ~1,000 commits (#854
+          # in vector). @semantic-release/github has no dedicated truncation
+          # option (semantic-release/github#622), but `releaseBodyTemplate`
+          # is a documented Lodash template (default
+          # `<%= nextRelease.notes %>`): https://github.com/semantic-release/github#options
+          # Skip without error if the consumer doesn't configure plugins via
+          # a `.releaserc.json` array (e.g. via `package.json`'s `release`
+          # key or a `.js`/`.yml` config instead) -- unless `ci-gated` is
+          # true, in which case that strip is mandatory: without it an
+          # untested CHANGELOG/git commit gets tagged, so fail closed rather
+          # than silently releasing an unreviewed commit.
+          if [[ -f .releaserc.json ]] && jq -e '.plugins | type == "array"' .releaserc.json >/dev/null 2>&1; then
+            TEMPLATE='<%= (function(n){var limit=120000;if(n.length<=limit)return n;var cut=n.lastIndexOf("\n",limit);if(cut<0)cut=limit;if(/[\uD800-\uDBFF]$/.test(n.slice(0,cut)))cut--;return n.slice(0,cut)+"\n\n---\n\n*Release notes truncated at "+limit+" characters -- see CHANGELOG.md for the complete history.*";})(nextRelease.notes||"") %>'
+            GATED_ARG=false; [[ "$CI_GATED" == "true" ]] && GATED_ARG=true
+            jq --arg t "$TEMPLATE" --argjson gated "$GATED_ARG" '
+              (if $gated then
+                .plugins |= map(select((if type == "array" then .[0] else . end)
+                  | IN("@semantic-release/changelog", "@semantic-release/git") | not))
+              else . end)
+              | .plugins |= map(
+                  if (if type == "array" then .[0] else . end) == "@semantic-release/github"
+                  then (
+                    if type == "array"
+                    then [.[0], ((.[1] // {}) + {releaseBodyTemplate: (.[1].releaseBodyTemplate // $t)})]
+                    else [., {releaseBodyTemplate: $t}]
+                    end
+                  )
+                  else .
+                  end
+                )
+            ' .releaserc.json > "$RUNNER_TEMP/releaserc.json"
+            mv "$RUNNER_TEMP/releaserc.json" .releaserc.json
+          elif [[ "$CI_GATED" == "true" ]]; then
+            echo "::error::ci-gated releases require a .releaserc.json with a plugins array to strip @semantic-release/changelog and @semantic-release/git before tagging -- without that strip an untested commit gets tagged. Failing closed." >&2
+            exit 1
+          else
+            echo "No .releaserc.json with a plugins array -- skipping release-notes cap."
           fi
           npx semantic-release
+
+      - name: Determine new tag
+        # HEAD may have moved (promote's trigger commit, semantic-release's
+        # own CHANGELOG commit), so compare points-at-HEAD tag *names*
+        # before/after rather than `git describe`. A name only counts as new
+        # if it's also on origin: a local `git tag` whose push failed (or a
+        # release that died before reaching the push) must not trigger a
+        # deploy for a tag the deploy-target workflow can't check out.
+        if: steps.promote.outputs.deferred != 'true'
+        id: after
+        env:
+          BEFORE_TAGS: ${{ steps.before.outputs.tags }}
+        run: |
+          NEW_TAGS=()
+          for t in $(git tag --points-at HEAD); do
+            case " $BEFORE_TAGS " in
+              *" $t "*) ;;
+              *) NEW_TAGS+=("$t") ;;
+            esac
+          done
+
+          if [[ ${#NEW_TAGS[@]} -gt 1 ]]; then
+            echo "::error::Multiple new tags point at HEAD (${NEW_TAGS[*]}) -- expected at most one new release tag per run, refusing to guess which to deploy." >&2
+            exit 1
+          fi
+
+          if [[ ${#NEW_TAGS[@]} -eq 0 ]]; then
+            echo "tag=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          NEW_TAG="${NEW_TAGS[0]}"
+          if git ls-remote --exit-code --tags origin "refs/tags/$NEW_TAG" >/dev/null 2>&1; then
+            RC=0
+          else
+            RC=$?
+          fi
+          if [[ $RC -eq 0 ]]; then
+            echo "tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          elif [[ $RC -eq 2 ]]; then
+            # Exit code 2 from `--exit-code` means no matching ref was found
+            # on origin -- a real "not pushed" signal, not an error.
+            echo "::warning::Tag $NEW_TAG was created locally but is not on origin (push may have failed) -- treating as no new release." >&2
+            echo "tag=none" >> "$GITHUB_OUTPUT"
+          else
+            # Any other exit code is a transport/auth failure, not a tag-
+            # absence signal -- failing here instead of treating it as "no
+            # tag" so the run doesn't go green without ever deploying.
+            echo "::error::git ls-remote failed checking origin for tag $NEW_TAG (exit $RC) -- transport or auth failure, not a tag-absence signal." >&2
+            exit 1
+          fi
 
       - name: Trigger production deploy if new release
         if: inputs.deploy-workflow != '' && steps.promote.outputs.deferred != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_WORKFLOW: ${{ inputs.deploy-workflow }}
-          BEFORE_TAG: ${{ steps.before.outputs.tag }}
+          NEW_TAG: ${{ steps.after.outputs.tag }}
         run: |
-          LATEST_TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo none)
-
-          if [[ "$LATEST_TAG" == "$BEFORE_TAG" || "$LATEST_TAG" == "none" ]]; then
-            echo "No new release — skipping deploy"
+          if [[ "$NEW_TAG" == "none" ]]; then
+            echo "No new tag -- skipping deploy"
             exit 0
           fi
 
-          echo "New release: $LATEST_TAG (was $BEFORE_TAG) — triggering $DEPLOY_WORKFLOW"
+          echo "New tag: $NEW_TAG -- triggering $DEPLOY_WORKFLOW"
           # --ref main: without it the run lands on the repo's default branch, which
           # is develop in most repos, and `production` only deploys from main or v*.
-          gh workflow run "$DEPLOY_WORKFLOW" --ref main -f version="$LATEST_TAG"
+          gh workflow run "$DEPLOY_WORKFLOW" --ref main -f version="$NEW_TAG"
+
+      - name: Fail if semantic-release itself failed
+        # The deploy dispatch above already ran (or correctly skipped) against
+        # whatever tag exists. Fail now, after that dispatch, so the run still
+        # shows red and the publish error (GitHub Release, npm, etc.) is not
+        # silently swallowed by `continue-on-error` on the step above.
+        if: steps.semrel.outcome == 'failure'
+        run: |
+          echo "::error::semantic-release failed -- see the 'Run semantic-release' step above for the actual error. A new tag may have been created and deploy may already have been dispatched for it; this failure is about the publish step itself (e.g. GitHub Release creation), not about whether a release happened. See https://github.com/Lumist-Labs/vector/issues/854." >&2
+          exit 1
