@@ -102,12 +102,23 @@ test.
 Before running semantic-release it injects a `releaseBodyTemplate` into the caller's
 `@semantic-release/github` plugin config (unless the caller already set one), capping
 the GitHub Release body at 120,000 characters -- GitHub's Releases API rejects bodies
-over 125,000. The deploy dispatch itself reads the tag from `git describe`, not from
-`gh release view`: semantic-release's core creates and pushes the `vX.Y.Z` tag before
-any publish plugin runs, so a `publish` failure (GitHub Release creation, npm, etc.)
-still leaves a real tag to deploy. The `npx semantic-release` step runs with
+over 125,000 -- and skips that injection without error if the caller's
+`.releaserc.json` has no `plugins` array. The deploy dispatch itself compares
+`git tag --points-at HEAD` before and after running semantic-release (not
+`git describe`, which can report an unrelated older tag, and not `gh release view`,
+which can't see a tag whose GitHub Release failed to publish), then confirms the new
+tag name actually reached `origin` via `git ls-remote` before dispatching --
+semantic-release's core creates and pushes the `vX.Y.Z` tag before any `publish`
+plugin runs, so a `publish` failure (GitHub Release creation, npm, etc.) still leaves
+a real, pushed tag to deploy, while a tag that only exists locally (a failed push)
+does not trigger a deploy. The `npx semantic-release` step runs with
 `continue-on-error: true` for exactly this reason; a dedicated step fails the job
 afterward if it did fail, so the run still shows red without blocking the dispatch.
+
+Consumers must not list `.releaserc.json` in `@semantic-release/git`'s `assets` --
+this step rewrites that file in the checked-out working tree before semantic-release
+runs, and `@semantic-release/git` would commit the rewritten (injected-template,
+ci-gated-stripped) copy into the repo's history instead of the source-controlled one.
 
 ## Prod-deployer gate
 
