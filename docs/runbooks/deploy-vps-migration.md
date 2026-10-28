@@ -172,13 +172,12 @@ Prod shims should NOT include `allow-clone: true`. If the VPS directory is ever 
 
 ### Extra shared folders in the `.env` (`extra-shared-path-1/2/3`)
 
-The primary `app-path` (in `app-project-slug`) is always rendered into the `.env`. Repos that also need **shared** secrets in the app `.env` (e.g. areteos pulls `/teams` and `/aws/accounts/arete/ses-sender-user`) list those folders here — each is loaded from `shared-project-slug` and merged into the same `.env`:
+The primary `app-path` (in `app-project-slug`) is always rendered into the `.env`. Repos that also need **shared** secrets in the app `.env` (e.g. areteos pulls `/aws/accounts/arete/ses-sender-user`) list those folders here — each is loaded from `shared-project-slug` and merged into the same `.env`:
 
 ```yaml
       app-path: /areteos                                  # primary, app-project
-      extra-shared-path-1: /teams                         # shared-project
-      extra-shared-path-2: /aws/accounts/arete/ses-sender-user
-      # extra-shared-path-3: ...
+      extra-shared-path-1: /aws/accounts/arete/ses-sender-user   # shared-project
+      # extra-shared-path-2: ...
 ```
 
 **Keep every loaded folder's keys disjoint.** The files are concatenated extras first and `app-path` last, but that does not decide a collision: each dotenv load only sees keys not already exported earlier in the job, so a duplicate key keeps the first load's value (see the merge step in `actions/vps-deploy-core/action.yml`). Up to 3 extra shared folders, all in `shared-project-slug`; `extra-app-path-1/2/3` do the same for more folders in `app-project-slug`. (Infisical imports on the app folder still work too, and need no input — use whichever you prefer; `extra-shared-path-*` keeps the choice visible in the workflow.)
@@ -226,7 +225,7 @@ The shared workflow can snapshot the live DB **before** `compose up` recreates c
 
 ## Worked example — areteos (multi-shared-folder + Postgres)
 
-areteos is the case that exercises everything: it pulls SES (+ Teams in prod) from the shared project into the `.env`, and runs Postgres. Use these as the reference shape for a multi-folder Postgres app.
+areteos is the case that exercises everything: it pulls SES from the shared project into the `.env`, and runs Postgres. Use these as the reference shape for a multi-folder Postgres app.
 
 **`deploy-dev.yml`** (loads `/areteos` + shared `/ses`; clones allowed):
 
@@ -265,7 +264,7 @@ jobs:
       db-user: areteos
 ```
 
-**`deploy-prod.yml`** (loads `/areteos` + shared `/teams` + `/ses`; no clone):
+**`deploy-prod.yml`** (loads `/areteos` + shared `/ses`; no clone):
 
 ```yaml
 name: Deploy Production
@@ -289,8 +288,7 @@ jobs:
       app-project-slug: ${{ vars.INFISICAL_INTERNAL_PROJECT_SLUG }}
       env-slug: prod
       app-path: /areteos
-      extra-shared-path-1: /teams                                # Teams webhook → .env
-      extra-shared-path-2: /aws/accounts/arete/ses-sender-user   # SES → .env
+      extra-shared-path-1: /aws/accounts/arete/ses-sender-user   # SES → .env
       vps-user: ${{ vars.VPS_USER }}
       repo-dir: /home/sglyon/areteos   # all apps share the /home/sglyon root on the VPS
       repo-url: https://github.com/aretecp/areteos.git

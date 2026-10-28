@@ -3,9 +3,7 @@
 Post a Block Kit card to a Slack channel with `chat.postMessage`, optionally followed by
 the long version as replies in the card's thread.
 
-The Slack counterpart of [`teams-notify`](../teams-notify). It takes the same `title` / `text` / `status` /
-`facts` / `button-*` inputs, so moving a caller over means changing `uses:`, the token env
-var, and adding `channel`. Layout follows the org Slack style: card = summary, thread = everything.
+Layout follows the org Slack style: card = summary, thread = everything.
 
 ## Usage
 
@@ -110,8 +108,7 @@ on every message, so a GitHub URL doesn't expand into a preview that buries the 
 **Slack's `ok: false` fails the step.** `chat.postMessage` answers HTTP 200 even for a bad
 token, an unknown channel or a missing scope, with the reason in the body. The action
 checks `ok` and fails with Slack's `error` string (`invalid_auth`, `channel_not_found`,
-`not_in_channel`, `missing_scope`). This keeps `teams-notify`'s contract that a broken
-notifier is a red run, not a silence.
+`not_in_channel`, `missing_scope`). A broken notifier is a red run, not a silence.
 
 **Replies fail the step too.** The card's `ts` is written before the replies post, so a
 failed reply leaves the output set and the step red. Long `thread-text` is still bounded by
@@ -120,5 +117,5 @@ the runner's per-variable env limit (~128 KB); write anything bigger to a file a
 **Link buttons still send a click event** to the Slack app. Until the app has a listener,
 Slack may show a small warning icon after a click. The link itself opens fine.
 
-**Notify on transitions, not on a timer.** Same advice as `teams-notify`: a daily "still
+**Notify on transitions, not on a timer.** A daily "still
 broken" trains people to mute the channel.

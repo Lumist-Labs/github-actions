@@ -11,8 +11,8 @@ name: PR hooks (shared)
 #   3. Generate a Markdown summary via Claude
 #   4. Update the PR body with the summary + Closes #N footers
 #   5. Request review from the `core` team
-#   6. Post a Teams card and a Slack card (#devs-prs) with the latest body;
-#      the Slack card threads the full AI summary
+#   6. Post a Slack card (#devs-prs) with the latest body; the card threads
+#      the full AI summary
 #      (opened / ready_for_review only)
 #
 # Each consumer's `.github/workflows/pr-to-main-hooks.yml` becomes a thin
@@ -27,13 +27,12 @@ name: PR hooks (shared)
 # core-authored PRs (the main ruleset lets core merge without an approval); for
 # anyone else the ruleset already requires an approval and a core merge.
 #
-# The Teams and Slack cards run LAST so they see the auto-generated PR body,
+# The Slack card runs LAST so it sees the auto-generated PR body,
 # not the original empty / placeholder one. Step 4 skips drafts and skips
 # `synchronize` events (which fire on every push) so we don't re-post
 # the card on every commit.
 #
-# Two authentication paths for ANTHROPIC_API_KEY and
-# TEAMS_PR_NOTIFY_WEBHOOK_URL (mutually exclusive):
+# Two authentication paths for ANTHROPIC_API_KEY (mutually exclusive):
 #
 #   1. OIDC (preferred — ZERO caller inputs):
 #      The workflow reads `vars.INFISICAL_OIDC_IDENTITY_ID`,
@@ -41,10 +40,10 @@ name: PR hooks (shared)
 #      `vars.INFISICAL_SHARED_PROJECT_SLUG` from the CALLER's own repo
 #      variables (unlike secrets, vars resolve against the caller —
 #      verified 2026-07-28, beacon run 30369406219), then loads
-#      ANTHROPIC_API_KEY from `lumist-labs-internal/prod/github-actions` and
-#      TEAMS_PR_NOTIFY_WEBHOOK_URL from `lumist-labs-shared/prod/teams/pr-notify`.
-#      Slack's SLACK_BOT_TOKEN and SLACK_CHANNEL_DEVS_PRS come from the same
-#      shared project at `/slack/houston` and `/slack/channels` (OIDC only).
+#      ANTHROPIC_API_KEY from `lumist-labs-internal/prod/github-actions`.
+#      Slack's SLACK_BOT_TOKEN and SLACK_CHANNEL_DEVS_PRS come from
+#      `lumist-labs-shared/prod` at `/slack/houston` and `/slack/channels`
+#      (OIDC only).
 #
 #      ANTHROPIC_API_KEY comes from the shared CI folder, NOT the app's own
 #      folder. Apps keep their key for app-runtime use; CI has its own so
@@ -54,7 +53,7 @@ name: PR hooks (shared)
 #      wants the defaults passes no `with:` block at all.
 #
 #   2. Forwarded secrets (legacy — still works for backward compat):
-#      Caller forwards both secrets via `secrets:` block. Used when
+#      Caller forwards ANTHROPIC_API_KEY via `secrets:` block. Used when
 #      the caller hasn't migrated to OIDC yet.
 #
 # Auto-provided to reusable workflows:
@@ -100,7 +99,6 @@ on:
       #   app-path           → /github-actions   (shared CI key, not an app folder)
       #   shared-project-slug→ vars.INFISICAL_SHARED_PROJECT_SLUG   (caller's var)
       #   shared-env         → prod
-      #   shared-path        → /teams/pr-notify
       infisical-identity-id:
         description: 'Override the OIDC machine identity UUID. Defaults to the caller''s vars.INFISICAL_OIDC_IDENTITY_ID.'
         required: false
@@ -122,7 +120,7 @@ on:
         type: string
         default: ''
       infisical-shared-project-slug:
-        description: 'Override the Infisical project for TEAMS_PR_NOTIFY_WEBHOOK_URL. Defaults to the caller''s vars.INFISICAL_SHARED_PROJECT_SLUG.'
+        description: 'Override the Infisical project for the Slack token and channel IDs. Defaults to the caller''s vars.INFISICAL_SHARED_PROJECT_SLUG.'
         required: false
         type: string
         default: ''
@@ -131,11 +129,6 @@ on:
         required: false
         type: string
         default: ''
-      infisical-shared-path:
-        description: 'Infisical path containing TEAMS_PR_NOTIFY_WEBHOOK_URL.'
-        required: false
-        type: string
-        default: /teams/pr-notify
 
       runner:
         description: >-
@@ -148,9 +141,6 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         description: 'Anthropic API key. Required UNLESS infisical-identity-id is set (then loaded via OIDC).'
-        required: false
-      TEAMS_PR_NOTIFY_WEBHOOK_URL:
-        description: 'Teams Workflow incoming webhook URL. Required UNLESS infisical-identity-id is set (then loaded via OIDC).'
         required: false
 
 # One summary per PR, not one per push. This fires on `synchronize`, so every
@@ -172,7 +162,7 @@ jobs:
     # `npm install -g` below assumed a hosted runner: npm preinstalled, HOME
     # writable, a global prefix it may write to. None of that holds once
     # `runner:` names a self-hosted label -- lumios hit `npm: command not found`
-    # on every develop -> main promotion, so no issues were linked and no Teams
+    # on every develop -> main promotion, so no issues were linked and no PR
     # card was posted. setup-node supplies the toolchain; these two point npm's
     # cache and global prefix at the workspace instead of $HOME, which on a
     # self-hosted runner is often a directory the runner user cannot create.
@@ -211,25 +201,12 @@ jobs:
       # defaults cannot hold expressions, so `vars` coalescing happens at the
       # use site. Verified 2026-07-28 (beacon run 30369406219) that `vars`
       # resolve against the CALLER's repo inside a reusable workflow.
-      - name: Load TEAMS_PR_NOTIFY_WEBHOOK_URL from Infisical (OIDC)
-        id: load-teams
-        # A repo the Infisical identity's subject allowlist doesn't cover gets a
-        # 403 here, which should cost the card and the summary, not the whole hook.
-        # The step after both loads says out loud which secrets are missing, so an
-        # Infisical outage doesn't read like a repo nobody onboarded.
-        continue-on-error: true
-        if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
-        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
-        with:
-          method: oidc
-          identity-id: ${{ inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID }}
-          project-slug: ${{ inputs.infisical-shared-project-slug || vars.INFISICAL_SHARED_PROJECT_SLUG }}
-          environment: ${{ inputs.infisical-shared-env || 'prod' }}
-          path: ${{ inputs.infisical-shared-path }}
-
       - name: Load SLACK_BOT_TOKEN from Infisical (OIDC)
         id: load-slack
-        # Same degradation as the Teams load: a 403 costs the Slack post, not the hook.
+        # A repo the Infisical identity's subject allowlist doesn't cover gets a
+        # 403 here, which should cost the Slack post, not the whole hook. The
+        # step after the loads says out loud which secrets are missing, so an
+        # Infisical outage doesn't read like a repo nobody onboarded.
         continue-on-error: true
         if: ${{ (inputs.infisical-identity-id || vars.INFISICAL_OIDC_IDENTITY_ID) != '' }}
         uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
@@ -270,15 +247,14 @@ jobs:
 
       - name: Say which secrets are missing, if any
         if: >-
-          steps.load-teams.outcome != 'success' || steps.load-anthropic.outcome != 'success' ||
+          steps.load-anthropic.outcome != 'success' ||
           steps.load-slack.outcome != 'success' || steps.load-slack-channels.outcome != 'success'
         env:
-          TEAMS: ${{ steps.load-teams.outcome }}
           ANTHROPIC: ${{ steps.load-anthropic.outcome }}
           SLACK: ${{ steps.load-slack.outcome }}
           SLACK_CHANNELS: ${{ steps.load-slack-channels.outcome }}
         run: |
-          echo "::warning::Infisical load degraded (teams=$TEAMS, anthropic=$ANTHROPIC, slack=$SLACK, slack-channels=$SLACK_CHANNELS). Read the 403 body above: 'OIDC subject not allowed' means this repo is not on the identity's allowlist; anything else means Infisical itself is unhappy, and every repo is affected."
+          echo "::warning::Infisical load degraded (anthropic=$ANTHROPIC, slack=$SLACK, slack-channels=$SLACK_CHANNELS). Read the 403 body above: 'OIDC subject not allowed' means this repo is not on the identity's allowlist; anything else means Infisical itself is unhappy, and every repo is affected."
 
       - uses: actions/setup-node@v4
         with:
@@ -687,8 +663,8 @@ jobs:
           # Falls back to the raw body if no marker present (PR opened
           # before the AI step ran on this exact event).
           # `## Summary` is dropped (the card's own title already says what this
-          # is); any other h2 — `## Review notes` — becomes bold, because Teams
-          # MessageCard does not render `##` and would print the hashes raw.
+          # is); any other h2 — `## Review notes` — becomes bold, because Slack
+          # mrkdwn does not render `##` and would print the hashes raw.
           if grep -q '<!-- auto-summary -->' <<<"$BODY"; then
             DESC=$(printf '%s' "$BODY" \
               | sed -n '/<!-- auto-summary -->/,/<!-- \/auto-summary -->/p' \
@@ -703,24 +679,15 @@ jobs:
               | sed -E '/<!--[[:space:]]*auto-(closes|summary)[[:space:]]*-->/,/<!--[[:space:]]*\/auto-(closes|summary)[[:space:]]*-->/d')
           fi
 
-          # Trim leading/trailing whitespace. Slack threads the whole thing; Teams gets 500 chars.
+          # Trim leading/trailing whitespace. Slack threads the whole thing.
           FULL=$(printf '%s' "$DESC" | awk 'NF { p=1 } p' | sed -e 's/[[:space:]]*$//')
-          if [ -z "$FULL" ]; then
-            DESC="_(no description)_"
-          elif [ "${#FULL}" -gt 500 ]; then
-            DESC="${FULL:0:500}…"
-          else
-            DESC="$FULL"
-          fi
+          DESC="${FULL:-_(no description)_}"
 
           # The card's one sentence: the first bullet or line that isn't a bold heading.
           SUMMARY=$(printf '%s\n' "$DESC" \
             | grep -vE '^[[:space:]]*(\*\*[^*]+\*\*)?[[:space:]]*$' \
             | head -1 \
             | sed -E 's/^[[:space:]]*([-*+]|[0-9]+\.)[[:space:]]+//' || true)
-
-          printf '%s' "$BODY" > /tmp/card-body.txt
-          printf '%s' "$DESC" > /tmp/card-desc.txt
 
           # The event payload's title and size predate the retitle step and later pushes.
           gh pr view "$PR_NUMBER" --repo "$REPO" --json title,additions,deletions,changedFiles > /tmp/card-pr.json
@@ -782,7 +749,7 @@ jobs:
               '[{name:"Author",value:$author},{name:"Size",value:$size},{name:"Checks",value:$checks},{name:"Reviewers",value:$reviewers}]')"
           } >> "$GITHUB_OUTPUT"
 
-          # Mirrors the Teams webhook check: no token is a skipped post, not a failed job.
+          # No token is a skipped post, not a failed job: the warning names why.
           if [ -z "${SLACK_BOT_TOKEN:-}" ] || [ -z "${SLACK_CHANNEL_DEVS_PRS:-}" ]; then
             echo "::warning::No Slack token or #devs-prs channel ID resolved — skipping the Slack post. Either this repo's INFISICAL_* vars are unset, or it is not on the Infisical identity's subject allowlist."
             echo "slack=skip" >> "$GITHUB_OUTPUT"
@@ -790,96 +757,6 @@ jobs:
             echo "slack=post" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Post to Teams (with auto-generated PR body)
-        if: |
-          contains(fromJSON('["main", "master"]'), github.event.pull_request.base.ref) &&
-          !github.event.pull_request.draft &&
-          (github.event.action == 'opened' || github.event.action == 'ready_for_review')
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_BASE: ${{ github.event.pull_request.base.ref }}
-          PR_HEAD: ${{ github.event.pull_request.head.ref }}
-          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
-          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
-          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-          REPO: ${{ github.repository }}
-          # OIDC-loaded env.TEAMS_PR_NOTIFY_WEBHOOK_URL wins if present;
-          # falls back to forwarded secret for legacy callers.
-          WEBHOOK: ${{ env.TEAMS_PR_NOTIFY_WEBHOOK_URL || secrets.TEAMS_PR_NOTIFY_WEBHOOK_URL }}
-        run: |
-          set -euo pipefail
-
-          # A repo whose Infisical vars aren't wired up yet reaches here with an
-          # empty webhook, and curl would fail the whole job over a card.
-          if [ -z "$WEBHOOK" ]; then
-            echo "::warning::No Teams webhook resolved — skipping the card. Either this repo's INFISICAL_* vars are unset, or it is not on the Infisical identity's subject allowlist."
-            exit 0
-          fi
-
-          BODY=$(cat /tmp/card-body.txt)
-          DESC=$(cat /tmp/card-desc.txt)
-
-          # Linked issues — same closing-keyword set the GitHub auto-closer uses.
-          LINKED=$(printf '%s' "$BODY" \
-            | grep -oiE '(closes|close|closed|fix|fixes|fixed|resolve|resolves|resolved)[[:space:]]+#[0-9]+' \
-            | grep -oE '#[0-9]+' \
-            | sort -u \
-            | paste -sd ', ' - || true)
-          [ -z "$LINKED" ] && LINKED="—"
-
-          DIFFSTAT="+${PR_ADDITIONS} −${PR_DELETIONS} across ${PR_CHANGED_FILES} file(s)"
-
-          # Append a markdown link to the description so users get a
-          # clickable "View PR" affordance — Teams Workflow webhooks
-          # render `potentialAction` buttons inconsistently, but inline
-          # markdown links work everywhere. Two-line gap (\n\n) separates
-          # it visually from the summary text.
-          DESC_WITH_LINK=$(printf '%s\n\n[View PR →](%s)' "$DESC" "$PR_URL")
-
-          # jq builds the payload with proper string escaping — avoids
-          # quoting bugs on PR titles or bodies that contain " or backticks.
-          PAYLOAD=$(jq -n \
-            --arg title "${REPO} · PR #${PR_NUMBER} → ${PR_BASE}" \
-            --arg pr_title "$PR_TITLE" \
-            --arg activity "opened by **${PR_AUTHOR}**" \
-            --arg branches "\`${PR_HEAD}\` → \`${PR_BASE}\`" \
-            --arg desc "$DESC_WITH_LINK" \
-            --arg diffstat "$DIFFSTAT" \
-            --arg linked "$LINKED" \
-            --arg url "$PR_URL" \
-            '{
-              "@type": "MessageCard",
-              "@context": "http://schema.org/extensions",
-              "themeColor": "0076D7",
-              "summary": $title,
-              "title": $title,
-              "text": ("**" + $pr_title + "**"),
-              "sections": [{
-                "activityTitle": $activity,
-                "activitySubtitle": $branches,
-                "facts": [
-                  {"name": "Diff",   "value": $diffstat},
-                  {"name": "Closes", "value": $linked}
-                ],
-                "text": $desc
-              }],
-              "potentialAction": [{
-                "@type": "OpenUri",
-                "name": "View PR",
-                "targets": [{"os": "default", "uri": $url}]
-              }]
-            }')
-
-          # Fail loud if the webhook returns non-2xx so config drift
-          # (revoked URL, malformed payload) shows up in the workflow run.
-          curl -fsS -H 'Content-Type: application/json' \
-               -d "$PAYLOAD" "$WEBHOOK"
-
-      # `!cancelled()`, not the implicit `success()`, so a failed Teams post
-      # doesn't also cost the Slack one.
       - name: Post to Slack (with auto-generated PR body)
         if: ${{ !cancelled() && steps.card.outputs.slack == 'post' }}
         uses: Lumist-Labs/github-actions/actions/slack-notify@v2
