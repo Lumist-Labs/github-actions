@@ -626,7 +626,7 @@ jobs:
           github.repository_owner == 'Lumist-Labs' &&
           !github.event.pull_request.draft &&
           (github.event.action == 'opened' || github.event.action == 'ready_for_review')
-        # A missed review request must not stop the cards; the failure still
+        # A missed review request must not stop the card; the failure still
         # shows as a warning on the run.
         continue-on-error: true
         env:
@@ -635,7 +635,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" -f 'team_reviewers[]=core' --silent
 
-      - name: Extract PR summary for the cards
+      - name: Extract PR summary for the card
         id: card
         # Same gating as the reviewer step — fires once on PR open / ready,
         # not on every push. Runs AFTER the body update so the card text
