@@ -95,7 +95,7 @@ on:
       extra-shared-path-1:
         description: >-
           Optional ADDITIONAL folder (in shared-project-slug) to render into the
-          app `.env` — e.g. `/teams` or `/aws/accounts/arete/ses-sender-user`.
+          app `.env` — e.g. `/aws/accounts/arete/ses-sender-user`.
           For shared app secrets that several services consume. Must not share a
           key name with app-path or any other loaded folder — a real collision does
           not reliably resolve to app-path winning (see vps-deploy-core/action.yml's

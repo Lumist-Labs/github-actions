@@ -25,7 +25,7 @@ One action per directory. The directory name is the action's public name — pic
 2. **Branch off `main`** (this repo has no `develop`) with `feat/<issue#>-<short-name>` (e.g. `feat/12-tailscale-connect`).
 3. **Create `actions/<name>/action.yml`** following the schema below.
 4. **Write `actions/<name>/README.md`** — show a `uses:` block, document every input and output, list any required secrets/permissions.
-5. **Add a smoke-test workflow** under `.github/workflows/smoke-<name>.yml` if the action can run without real credentials. [`smoke-teams-notify.yml`](.github/workflows/smoke-teams-notify.yml) is the pattern. Actions that need a VPS, AWS or Infisical are validated by a consumer run instead (see [`RELEASING.md`](RELEASING.md#pre-release-checklist)).
+5. **Add a smoke-test workflow** under `.github/workflows/smoke-<name>.yml` if the action can run without real credentials. [`smoke-slack-notify.yml`](.github/workflows/smoke-slack-notify.yml) is the pattern. Actions that need a VPS, AWS or Infisical are validated by a consumer run instead (see [`RELEASING.md`](RELEASING.md#pre-release-checklist)).
 6. **Open a PR** linking the issue with `Closes #N`, titled `feat:` so merging releases it. Verify `lint-workflows.yml` and any smoke test are green.
 
 ## `action.yml` schema
@@ -61,7 +61,7 @@ Conventions:
 
 - **Input names** are `kebab-case` (`project-id`, not `projectId` or `project_id`).
 - **Required vs optional** — required inputs have no `default`; optional inputs always have one.
-- **Secrets** go through `env:` at the call site, not inputs, so they don't leak into the workflow log on misuse (`teams-notify` reads `TEAMS_WEBHOOK_URL` this way). Document the env var names in the action's README. Older exceptions exist: `load-infisical-secrets` takes `client-secret` and `wait-for-healthy` takes `key` as inputs.
+- **Secrets** go through `env:` at the call site, not inputs, so they don't leak into the workflow log on misuse (`slack-notify` reads `SLACK_BOT_TOKEN` this way). Document the env var names in the action's README. Older exceptions exist: `load-infisical-secrets` takes `client-secret` and `wait-for-healthy` takes `key` as inputs.
 - **Outputs** must come from a step with an explicit `id:`. Don't rely on implicit step IDs.
 - **Idempotency** — composite actions get re-run on `act` and during PR rebases. Don't write to shared state without guards.
 
@@ -101,7 +101,7 @@ When you bump major, the old `vN` tag stays where it is — it does not advance.
 
 ## Smoke tests
 
-Only `teams-notify` has one today. Where an action can run without real infrastructure, add a smoke-test workflow that runs on PRs touching `actions/<name>/**`. It should:
+Only `slack-notify` has one today. Where an action can run without real infrastructure, add a smoke-test workflow that runs on PRs touching `actions/<name>/**`. It should:
 
 - Run on the OS(es) the action supports (`ubuntu-latest` at minimum)
 - Exercise the action with realistic inputs

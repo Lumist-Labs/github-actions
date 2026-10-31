@@ -32,8 +32,7 @@ inputs:
   text:
     description: >-
       Optional body text under the summary. Slack mrkdwn; the two common
-      Markdown forms callers already use with teams-notify — **bold** and
-      [label](url) — are converted. Prefer `summary` + `thread-text`.
+      Markdown forms — **bold** and [label](url) — are converted. Prefer `summary` + `thread-text`.
     required: false
     default: ''
 
@@ -136,7 +135,7 @@ runs:
       run: |
         set -euo pipefail
 
-        # info is the Lumist iris; the other three match teams-notify.
+        # info is the Lumist iris.
         case "$INPUT_STATUS" in
           info)    COLOR='#6957D8' ;;
           success) COLOR='#2EA043' ;;

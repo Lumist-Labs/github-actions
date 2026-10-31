@@ -17,16 +17,16 @@ referenced at `@v2` too, so one tag move ships the whole graph.
 | `vps-deploy-core` | `load-infisical-secrets` (app, extras, infra), `tailscale-connect`, `wait-for-healthy` | — |
 | `wait-for-healthy` | — | `scripts/wait-for-healthy.sh`, read from its own action checkout (`github.action_path/../../scripts`) and piped over SSH |
 | `release-shared.yml` | — (semantic-release in the caller's repo) | — |
-| `pr-to-main-hooks.yml` | `load-infisical-secrets` ×4 (CI Anthropic key, Teams webhook, Slack token, Slack channels), `slack-notify` | — |
+| `pr-to-main-hooks.yml` | `load-infisical-secrets` ×3 (CI Anthropic key, Slack token, Slack channels), `slack-notify` | — |
 | `claude-issue-triage.yml` | `load-infisical-secrets` | `.claude/prompts/ci-triage.md` at `shared-ref` |
 | `claude-issue-autopilot.yml` | none (key is a forwarded secret) | `.claude/prompts/ci-autopilot-{score,implement}.md`, `scripts/autopilot-verdict.js`, `scripts/autopilot-attachments.js` at `shared-ref` |
 | `aws-deploy-core` | — (`aws-actions/configure-aws-credentials`, SHA-pinned) | `actions/aws-deploy-core/scripts/{ec2-compose-deploy,ecs-run-task}.sh`, from its own action checkout |
 | `ecr-build-push` | — (AWS and Docker upstream actions, SHA-pinned) | — |
 
 Workflows that run in this repo only: `release.yml`, `lint-workflows.yml`,
-`smoke-teams-notify.yml`, `smoke-slack-notify.yml`, `ci-images.yml`, `pr-hooks.yml` (dogfoods
+`smoke-slack-notify.yml`, `ci-images.yml`, `pr-hooks.yml` (dogfoods
 `pr-to-main-hooks.yml@v2`), and `entra-secret-detector.yml` (uses `./actions/load-infisical-secrets`,
-`./actions/teams-notify`, `./actions/slack-notify` and `scripts/entra-credential-scan.sh` from its own checkout).
+`./actions/slack-notify` and `scripts/entra-credential-scan.sh` from its own checkout).
 
 ### Why composites reference each other at `@v2`
 
@@ -195,7 +195,7 @@ and non-`.github` paths were not scanned. Pins other than `@v2` are noted.
 | `tailscale-connect` | litellm-gateway, lumilearn, vector; aretecp: ms-365-mcp-server (`@v1`), teams-bot (`@v1`) |
 | `wait-for-healthy` | aretecp: ms-365-mcp-server, teams-bot |
 | `assert-prod-deployer` | litellm-gateway, lumios, vector |
-| `aws-deploy-core`, `ecr-build-push`, `teams-notify` | lumios, vector |
+| `aws-deploy-core`, `ecr-build-push` | lumios, vector |
 
 Callers of `vps-deploy-core` directly, or of `scripts/*` over raw URLs: none found in
 `.github/`; anything outside `.github/` is **unknown**. CI image consumers are recorded
