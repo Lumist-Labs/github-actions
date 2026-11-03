@@ -63,6 +63,7 @@ repo, keeping the scheme, when its owner/name differs.
 | `db-name`, `db-user` | `''` | postgres |
 | `snapshot-dir` | `''` | sqlite: `<dirname db-path>/pre-deploy-snapshots` in the container; postgres: `<repo-dir>/pre-deploy-snapshots` on the host |
 | `snapshot-retention-days` | `7` | |
+| `snapshot-keep` | `10` | Count cap, applied after the age limit |
 | `skip-pre-deploy` | `false` | Break-glass |
 
 The snapshot is skipped when the DB container is not cleanly running (first deploy).
