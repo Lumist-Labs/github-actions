@@ -214,6 +214,14 @@ inputs:
     required: false
     default: '7'
 
+  snapshot-keep:
+    description: >-
+      Keep at most this many pre-deploy snapshots, newest first, on top of the
+      age limit. Default 10. Age alone let a dev branch deploying ~20x/day pile
+      up 146 copies of a 640MB DB and fill the shared Docker volume.
+    required: false
+    default: '10'
+
   skip-pre-deploy:
     description: >-
       Break-glass: true skips the pre-deploy DB backup entirely. Wire to a
@@ -727,11 +735,12 @@ runs:
         REPO_DIR: ${{ inputs.repo-dir }}
         SNAPSHOT_DIR: ${{ inputs.snapshot-dir }}
         RETENTION_DAYS: ${{ inputs.snapshot-retention-days }}
+        SNAPSHOT_KEEP: ${{ inputs.snapshot-keep }}
       with:
         host: ${{ env.VPS_TAILSCALE_IP }}
         username: ${{ inputs.vps-user }}
         key: ${{ env.VPS_SSH_KEY }}
-        envs: DB_TYPE,DB_CONTAINER,DB_PATH,DB_NAME,DB_USER,REPO_DIR,SNAPSHOT_DIR,RETENTION_DAYS
+        envs: DB_TYPE,DB_CONTAINER,DB_PATH,DB_NAME,DB_USER,REPO_DIR,SNAPSHOT_DIR,RETENTION_DAYS,SNAPSHOT_KEEP
         command_timeout: 5m
         script: |
           set -euo pipefail
@@ -768,10 +777,11 @@ runs:
               # sit at the script block's BASE column (12 spaces) so YAML
               # dedent lands the Python at column 0 — a python -c nested
               # deeper would dedent to a leading indent → IndentationError.
-              docker exec -i -e DB_PATH="$DB_PATH" -e SNAP_DIR="$SNAP_DIR" -e TS="$TS" -e RETENTION_DAYS="$RETENTION_DAYS" "$DB_CONTAINER" python - <<'PYEOF'
+              docker exec -i -e DB_PATH="$DB_PATH" -e SNAP_DIR="$SNAP_DIR" -e TS="$TS" -e RETENTION_DAYS="$RETENTION_DAYS" -e SNAPSHOT_KEEP="$SNAPSHOT_KEEP" "$DB_CONTAINER" python - <<'PYEOF'
           import sqlite3, os, time
           db = os.environ["DB_PATH"]; snap_dir = os.environ["SNAP_DIR"]
           ts = os.environ["TS"]; retention = int(os.environ["RETENTION_DAYS"])
+          keep = int(os.environ["SNAPSHOT_KEEP"])
           src = sqlite3.connect(db)
           integ = src.execute("PRAGMA integrity_check").fetchone()[0]
           print("main_integrity:", integ)
@@ -785,11 +795,13 @@ runs:
           assert snap_integ == "ok", f"Snapshot integrity failed: {snap_integ}"
           dst.close(); src.close(); print("snapshot:", snap)
           cutoff = time.time() - retention * 86400; pruned = 0
-          for f in os.listdir(snap_dir):
-              if f.startswith("pre-deploy-") and f.endswith(".db"):
-                  p = os.path.join(snap_dir, f)
-                  if os.stat(p).st_mtime < cutoff:
-                      os.remove(p); pruned += 1
+          snaps = sorted(
+              (os.path.join(snap_dir, f) for f in os.listdir(snap_dir)
+               if f.startswith("pre-deploy-") and f.endswith(".db")),
+              key=os.path.getmtime, reverse=True)
+          for i, p in enumerate(snaps):
+              if i >= keep or os.path.getmtime(p) < cutoff:
+                  os.remove(p); pruned += 1
           print("pruned:", pruned)
           PYEOF
               ;;
@@ -813,7 +825,8 @@ runs:
               fi
               echo "snapshot: $SNAP ($(du -h "$SNAP" | cut -f1))"
               find "$SNAP_DIR" -name 'pre-deploy-*.sql.gz' -mtime "+$RETENTION_DAYS" -delete
-              echo "pruned snapshots older than ${RETENTION_DAYS}d"
+              ls -1t "$SNAP_DIR"/pre-deploy-*.sql.gz | tail -n "+$((SNAPSHOT_KEEP + 1))" | xargs -r rm -f
+              echo "pruned snapshots older than ${RETENTION_DAYS}d or beyond the newest ${SNAPSHOT_KEEP}"
               ;;
             *)
               echo "::error::Unknown db-type '$DB_TYPE' (expected sqlite|postgres|none)." >&2
