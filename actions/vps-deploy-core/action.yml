@@ -944,3 +944,32 @@ runs:
           set -euo pipefail
           cd "$REPO_DIR"
           eval "$POST_DEPLOY_COMMAND"
+
+    # Each `up --build` retags <project>-<service>:latest and strands the
+    # previous image untagged: 1132 of them sat on ssdnode2 on 2026-11-05 at
+    # 98% disk. The compose project label scopes this to the app just deployed,
+    # so a shared box's other stacks are untouched, and `image prune` without -a
+    # only takes untagged images no container uses. A failure here is reported,
+    # not fatal: the deploy is already healthy.
+    - name: Prune this project's untagged images on VPS
+      uses: appleboy/ssh-action@v1.2.0
+      env:
+        REPO_DIR: ${{ inputs.repo-dir }}
+        COMPOSE_FILE: ${{ inputs.compose-file }}
+        ENV_FILE_NAME: ${{ inputs.env-file-name }}
+      with:
+        host: ${{ env.VPS_TAILSCALE_IP }}
+        username: ${{ inputs.vps-user }}
+        key: ${{ env.VPS_SSH_KEY }}
+        envs: REPO_DIR,COMPOSE_FILE,ENV_FILE_NAME
+        command_timeout: 10m
+        script: |
+          set -uo pipefail
+          cd "$REPO_DIR"
+          project=$(docker compose --env-file "$ENV_FILE_NAME" -f "$COMPOSE_FILE" config 2>/dev/null | sed -n 's/^name: //p' | head -1)
+          if [[ -z "$project" ]]; then
+            echo "::warning::image prune skipped: could not resolve the compose project name for $COMPOSE_FILE"
+            exit 0
+          fi
+          docker image prune -f --filter "label=com.docker.compose.project=$project" | tail -1 \
+            || echo "::warning::image prune failed for project $project"
