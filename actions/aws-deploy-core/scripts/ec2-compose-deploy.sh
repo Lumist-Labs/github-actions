@@ -84,36 +84,41 @@ if [ -n "$HEALTHCHECK_URL" ]; then
 fi
 
 # Every release pulls a new tag and nothing removed the old ones: 74 of them
-# (158GB) filled lumios prod's Docker disk on 2026-11-05. Runs only once the
-# deploy is healthy, so a failed one leaves the previous images in place.
-# Keeps IMAGE plus the newest IMAGE_KEEP-1 others of the same repository;
-# `image rm` without -f refuses anything a container still references.
+# (158GB) filled lumios prod's Docker disk on 2026-11-05. Runs after a
+# successful `up` and, when configured, a passed healthcheck, so a failed
+# deploy leaves the previous images in place. Keeps IMAGE plus the newest
+# IMAGE_KEEP-1 others of the same repository; `image rm` without -f refuses
+# anything a container still references.
 if [ "$IMAGE_KEEP" -eq 0 ]; then
   echo "image prune skipped (image-keep 0)"
-  exit 0
-fi
-repo="${IMAGE%@*}"
-repo="${repo%:*}"
-# `image ls` order is not creation order (it differs under the containerd
-# image store), so sort on each image's RFC 3339 Created timestamp.
-keep_ids=$(
-  { docker image inspect --format '{{.Id}}' "$IMAGE"
-    docker image ls --no-trunc --format '{{.ID}}' "$repo" | sort -u \
+else
+  repo="${IMAGE%@*}"
+  repo="${repo%:*}"
+  # `image ls` order is not creation order (it differs under the containerd
+  # image store), so sort on each image's RFC 3339 Created timestamp. A failed
+  # listing skips the prune: a partial keep list would mark kept images for
+  # removal, and the deploy itself is already up.
+  if current=$(docker image inspect --format '{{.Id}}' "$IMAGE") \
+    && by_age=$(docker image ls --no-trunc --format '{{.ID}}' "$repo" | sort -u \
       | xargs -r docker image inspect --format '{{.Created}} {{.Id}}' \
-      | sort -r | cut -d' ' -f2; } \
-    | awk -v n="$IMAGE_KEEP" '!seen[$0]++ && ++kept <= n'
-)
-removed=0
-failed=0
-while read -r id ref; do
-  grep -qxF "$id" <<<"$keep_ids" && continue
-  # A re-pushed tag leaves its old image as <repo>:<none>, removable only by ID.
-  [[ "$ref" == *":<none>" ]] && ref="$id"
-  if docker image rm "$ref" >/dev/null; then
-    removed=$((removed + 1))
+      | sort -r | cut -d' ' -f2); then
+    keep_ids=$(printf '%s\n%s\n' "$current" "$by_age" \
+      | awk -v n="$IMAGE_KEEP" '!seen[$0]++ && ++kept <= n')
+    removed=0
+    failed=0
+    while read -r id ref; do
+      grep -qxF "$id" <<<"$keep_ids" && continue
+      # A re-pushed tag leaves its old image as <repo>:<none>, removable only by ID.
+      [[ "$ref" == *":<none>" ]] && ref="$id"
+      if docker image rm "$ref" >/dev/null; then
+        removed=$((removed + 1))
+      else
+        echo "WARN: could not remove $ref" >&2
+        failed=$((failed + 1))
+      fi
+    done < <(docker image ls --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' "$repo")
+    echo "image prune: removed $removed, failed $failed, kept newest $IMAGE_KEEP of $repo"
   else
-    echo "WARN: could not remove $ref" >&2
-    failed=$((failed + 1))
+    echo "WARN: image prune skipped, could not list images of $repo" >&2
   fi
-done < <(docker image ls --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' "$repo")
-echo "image prune: removed $removed, failed $failed, kept newest $IMAGE_KEEP of $repo"
+fi
