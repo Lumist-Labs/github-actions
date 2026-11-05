@@ -187,6 +187,15 @@ inputs:
     description: 'SQLite only: absolute path to the .db file inside db-container.'
     required: false
     default: ''
+  sqlite-functions:
+    description: >-
+      SQLite only: app-defined SQL functions to load before the integrity
+      check, as `module:fn1,fn2` importable in db-container's working dir
+      (e.g. `db.connection:casefold,firm_date`). Needed when the schema has
+      expression indexes on such functions, which a plain sqlite3 connection
+      can't check. Each is registered with one argument, deterministic.
+    required: false
+    default: ''
 
   db-name:
     description: 'Postgres only: database name to dump.'
@@ -730,6 +739,7 @@ runs:
         DB_TYPE: ${{ inputs.db-type }}
         DB_CONTAINER: ${{ inputs.db-container }}
         DB_PATH: ${{ inputs.db-path }}
+        SQLITE_FUNCTIONS: ${{ inputs.sqlite-functions }}
         DB_NAME: ${{ inputs.db-name }}
         DB_USER: ${{ inputs.db-user }}
         REPO_DIR: ${{ inputs.repo-dir }}
@@ -740,7 +750,7 @@ runs:
         host: ${{ env.VPS_TAILSCALE_IP }}
         username: ${{ inputs.vps-user }}
         key: ${{ env.VPS_SSH_KEY }}
-        envs: DB_TYPE,DB_CONTAINER,DB_PATH,DB_NAME,DB_USER,REPO_DIR,SNAPSHOT_DIR,RETENTION_DAYS,SNAPSHOT_KEEP
+        envs: DB_TYPE,DB_CONTAINER,DB_PATH,SQLITE_FUNCTIONS,DB_NAME,DB_USER,REPO_DIR,SNAPSHOT_DIR,RETENTION_DAYS,SNAPSHOT_KEEP
         command_timeout: 5m
         script: |
           set -euo pipefail
@@ -777,19 +787,29 @@ runs:
               # sit at the script block's BASE column (12 spaces) so YAML
               # dedent lands the Python at column 0 — a python -c nested
               # deeper would dedent to a leading indent → IndentationError.
-              docker exec -i -e DB_PATH="$DB_PATH" -e SNAP_DIR="$SNAP_DIR" -e TS="$TS" -e RETENTION_DAYS="$RETENTION_DAYS" -e SNAPSHOT_KEEP="$SNAPSHOT_KEEP" "$DB_CONTAINER" python - <<'PYEOF'
+              docker exec -i -e DB_PATH="$DB_PATH" -e SQLITE_FUNCTIONS="${SQLITE_FUNCTIONS:-}" -e SNAP_DIR="$SNAP_DIR" -e TS="$TS" -e RETENTION_DAYS="$RETENTION_DAYS" -e SNAPSHOT_KEEP="$SNAPSHOT_KEEP" "$DB_CONTAINER" python - <<'PYEOF'
           import sqlite3, os, time
           db = os.environ["DB_PATH"]; snap_dir = os.environ["SNAP_DIR"]
           ts = os.environ["TS"]; retention = int(os.environ["RETENTION_DAYS"])
           keep = int(os.environ["SNAPSHOT_KEEP"])
-          src = sqlite3.connect(db)
+          def load_functions(conn):
+              spec = os.environ.get("SQLITE_FUNCTIONS", "")
+              if not spec:
+                  return
+              import importlib, sys
+              sys.path.insert(0, os.getcwd())
+              mod, names = spec.split(":")
+              m = importlib.import_module(mod)
+              for n in names.split(","):
+                  conn.create_function(n.strip(), 1, getattr(m, n.strip()), deterministic=True)
+          src = sqlite3.connect(db); load_functions(src)
           integ = src.execute("PRAGMA integrity_check").fetchone()[0]
           print("main_integrity:", integ)
           assert integ == "ok", f"Main DB integrity failed: {integ}"
           os.makedirs(snap_dir, exist_ok=True)
           src.execute("PRAGMA wal_checkpoint(TRUNCATE)")
           snap = os.path.join(snap_dir, f"pre-deploy-{ts}.db")
-          dst = sqlite3.connect(snap); src.backup(dst)
+          dst = sqlite3.connect(snap); load_functions(dst); src.backup(dst)
           snap_integ = dst.execute("PRAGMA integrity_check").fetchone()[0]
           print("snap_integrity:", snap_integ)
           assert snap_integ == "ok", f"Snapshot integrity failed: {snap_integ}"
