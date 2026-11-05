@@ -226,6 +226,7 @@ mutated. The alternative — repository variables with hardcoded fallbacks, as
 | `compose-file` | no | `docker-compose.yml` | ec2-compose: space-separated for an override stack |
 | `compose-profiles` | no | — | ec2-compose: space-separated `--profile` values |
 | `healthcheck-url` | no | — | curled on the host (ec2-compose) or from the runner (ecs-service) |
+| `image-keep` | no | `3` | ec2-compose: images of the deployed repo kept after a healthy deploy, current included; `0` disables. Also removes old unreferenced images of that repo, e.g. a one-shot service's |
 | `command-timeout` | no | `1800` | ec2-compose: seconds; a cold build outlasts less |
 | `container-name` | ecs-service | — | container definition to point at `image` |
 | `migrate-command` | no | — | ecs-service: JSON array, gating one-off task before `update-service`; empty skips |

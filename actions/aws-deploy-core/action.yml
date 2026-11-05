@@ -127,6 +127,14 @@ inputs:
     required: false
     default: ''
 
+  image-keep:
+    description: >-
+      ec2-compose: images of the deployed repository to keep on the host after
+      a healthy deploy, counting the one just deployed. Older ones are removed.
+      0 disables the prune.
+    required: false
+    default: '3'
+
   command-timeout:
     description: 'ec2-compose: seconds to wait for the remote command. A cold image build outlasts the default easily.'
     required: false
@@ -487,11 +495,17 @@ runs:
         ENV_PARAMETER_NAME: ${{ inputs.env-parameter-name }}
         ENV_FILE_NAME: ${{ inputs.env-file-name }}
         HEALTHCHECK_URL: ${{ inputs.healthcheck-url }}
+        IMAGE_KEEP: ${{ inputs.image-keep }}
         COMMAND_TIMEOUT: ${{ inputs.command-timeout }}
         RUNNER_CHECKOUT_DIR: ${{ github.workspace }}
         DEPLOY_SCRIPT: ${{ github.action_path }}/scripts/ec2-compose-deploy.sh
       run: |
         set -euo pipefail
+
+        if ! [[ "$IMAGE_KEEP" =~ ^[0-9]+$ ]]; then
+          echo "::error::image-keep must be a non-negative integer, got '$IMAGE_KEEP'." >&2
+          exit 1
+        fi
 
         # Every value the host script needs is a plain `export NAME='value'`
         # line — the same mechanism already proven safe all through this
@@ -508,6 +522,7 @@ runs:
           echo "export ENV_PARAMETER_NAME='$ENV_PARAMETER_NAME'"
           echo "export ENV_FILE_NAME='$ENV_FILE_NAME'"
           echo "export HEALTHCHECK_URL='$HEALTHCHECK_URL'"
+          echo "export IMAGE_KEEP='$IMAGE_KEEP'"
           i=0
           for f in $COMPOSE_FILE; do
             path="$RUNNER_CHECKOUT_DIR/$f"
