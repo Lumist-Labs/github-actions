@@ -53,6 +53,8 @@ repo, keeping the scheme, when its owner/name differs.
 | `preflight-service` | with the above | `''` | Compose service whose image runs it; built or pulled first |
 | `pre-compose-up-script` | no | `''` | Bash run after the `.env` write, before compose up. Rollback's DB restore goes here |
 
+After a successful deploy, the app's untagged images are pruned (`docker image prune` filtered on its compose project label). Tagged images, images in use and other projects' images are left alone. Only built images carry that label, so `compose-build: false` deploys and `deploy-command` deploys (which may set their own `-p`) are not pruned here. Build cache is the box janitor's job: [`docker-prune.sh`](../../scripts/docker-prune.sh).
+
 **Pre-deploy DB snapshot**
 
 | Input | Default | Notes |

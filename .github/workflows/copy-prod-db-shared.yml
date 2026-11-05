@@ -128,6 +128,18 @@ on:
         type: string
         default: ''
 
+      sqlite-integrity-command:
+        description: >-
+          SQLite only: command run inside `prod-db-container` to check the
+          snapshot, with the snapshot path appended (e.g.
+          `python -m db.integrity_check`). For apps whose schema has
+          expression indexes on app-defined SQL functions, which a plain
+          sqlite3 connection can't check. Must exit non-zero on failure.
+          Empty runs a plain `PRAGMA integrity_check`.
+        required: false
+        type: string
+        default: ''
+
       dev-db-path:
         description: >-
           SQLite only: absolute path to the dev `.db` file INSIDE
@@ -318,6 +330,7 @@ jobs:
           DEV_DB_CONTAINER: ${{ inputs.dev-db-container }}
           PROD_DB_PATH: ${{ inputs.prod-db-path }}
           DEV_DB_PATH: ${{ inputs.dev-db-path }}
+          SQLITE_INTEGRITY_COMMAND: ${{ inputs.sqlite-integrity-command }}
           DEV_COMPOSE_FILE: ${{ inputs.dev-compose-file }}
           DEV_APP_CONTAINER: ${{ inputs.dev-app-container }}
           DEV_BACKUP_DIR: ${{ inputs.dev-backup-dir }}
@@ -325,7 +338,7 @@ jobs:
           host: ${{ env.VPS_TAILSCALE_IP }}
           username: ${{ inputs.vps-user }}
           key: ${{ env.VPS_SSH_KEY }}
-          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,PROD_DB_PATH,DEV_DB_PATH,DEV_COMPOSE_FILE,DEV_APP_CONTAINER,DEV_BACKUP_DIR
+          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,PROD_DB_PATH,DEV_DB_PATH,SQLITE_INTEGRITY_COMMAND,DEV_COMPOSE_FILE,DEV_APP_CONTAINER,DEV_BACKUP_DIR
           command_timeout: 10m
           script: |
             set -euo pipefail
@@ -360,12 +373,17 @@ jobs:
 
             # Step 2: Integrity-check the snapshot inside the prod container.
             echo "Step 2: Integrity-check prod snapshot..."
-            docker exec "$PROD_DB_CONTAINER" python -c "
+            if [ -n "${SQLITE_INTEGRITY_COMMAND:-}" ]; then
+              # Word-split on purpose: the input is a command plus its arguments.
+              docker exec "$PROD_DB_CONTAINER" $SQLITE_INTEGRITY_COMMAND /tmp/prod_snapshot_copy.db
+            else
+              docker exec "$PROD_DB_CONTAINER" python -c "
             import sqlite3
             r = sqlite3.connect('/tmp/prod_snapshot_copy.db').execute('PRAGMA integrity_check').fetchone()[0]
             print('prod_snapshot_integrity:', r)
             assert r == 'ok', f'Prod snapshot integrity failed: {r}'
             "
+            fi
 
             # Step 3: Copy snapshot from prod container to VPS host.
             echo "Step 3: Copying prod snapshot to host..."
