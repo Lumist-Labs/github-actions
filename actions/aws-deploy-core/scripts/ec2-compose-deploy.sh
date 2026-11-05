@@ -4,7 +4,7 @@
 # environment variable, exported ahead of this script by the calling action.
 #
 # Expects: REPO_DIR, IMAGE, COMPOSE_FILE, COMPOSE_PROFILES_LIST, AWS_REGION,
-# ENV_PARAMETER_NAME, ENV_FILE_NAME, HEALTHCHECK_URL, and COMPOSE_B64_0,
+# ENV_PARAMETER_NAME, ENV_FILE_NAME, HEALTHCHECK_URL, IMAGE_KEEP, and COMPOSE_B64_0,
 # COMPOSE_B64_1, ... — one per file in COMPOSE_FILE, in the same order. The
 # index is positional, set by the caller iterating `for f in $COMPOSE_FILE`
 # the same way this script does — nothing about the filename itself needs to
@@ -67,14 +67,53 @@ IMAGE="$IMAGE" docker compose "${compose_args[@]}" up -d --remove-orphans
 exec 200>&-
 
 if [ -n "$HEALTHCHECK_URL" ]; then
+  healthy=false
   for i in $(seq 1 30); do
     if curl -fsS "$HEALTHCHECK_URL" >/dev/null 2>&1; then
       echo "healthy after $i attempt(s)"
-      exit 0
+      healthy=true
+      break
     fi
     sleep 10
   done
-  echo "FATAL: $HEALTHCHECK_URL never returned 2xx" >&2
-  docker compose "${compose_args[@]}" ps
-  exit 1
+  if [ "$healthy" != true ]; then
+    echo "FATAL: $HEALTHCHECK_URL never returned 2xx" >&2
+    docker compose "${compose_args[@]}" ps
+    exit 1
+  fi
 fi
+
+# Every release pulls a new tag and nothing removed the old ones: 74 of them
+# (158GB) filled lumios prod's Docker disk on 2026-11-05. Runs only once the
+# deploy is healthy, so a failed one leaves the previous images in place.
+# Keeps IMAGE plus the newest IMAGE_KEEP-1 others of the same repository;
+# `image rm` without -f refuses anything a container still references.
+if [ "$IMAGE_KEEP" -eq 0 ]; then
+  echo "image prune skipped (image-keep 0)"
+  exit 0
+fi
+repo="${IMAGE%@*}"
+repo="${repo%:*}"
+# `image ls` order is not creation order (it differs under the containerd
+# image store), so sort on each image's RFC 3339 Created timestamp.
+keep_ids=$(
+  { docker image inspect --format '{{.Id}}' "$IMAGE"
+    docker image ls --no-trunc --format '{{.ID}}' "$repo" | sort -u \
+      | xargs -r docker image inspect --format '{{.Created}} {{.Id}}' \
+      | sort -r | cut -d' ' -f2; } \
+    | awk -v n="$IMAGE_KEEP" '!seen[$0]++ && ++kept <= n'
+)
+removed=0
+failed=0
+while read -r id ref; do
+  grep -qxF "$id" <<<"$keep_ids" && continue
+  # A re-pushed tag leaves its old image as <repo>:<none>, removable only by ID.
+  [[ "$ref" == *":<none>" ]] && ref="$id"
+  if docker image rm "$ref" >/dev/null; then
+    removed=$((removed + 1))
+  else
+    echo "WARN: could not remove $ref" >&2
+    failed=$((failed + 1))
+  fi
+done < <(docker image ls --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' "$repo")
+echo "image prune: removed $removed, failed $failed, kept newest $IMAGE_KEEP of $repo"
