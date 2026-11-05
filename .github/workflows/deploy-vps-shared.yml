@@ -336,6 +336,15 @@ on:
         type: string
         default: ''
 
+      sqlite-functions:
+        description: >-
+          SQLite only: app SQL functions loaded before the pre-deploy
+          integrity check, as `module:fn1,fn2` (e.g.
+          `db.connection:casefold,firm_date`). See vps-deploy-core.
+        required: false
+        type: string
+        default: ''
+
       db-name:
         description: 'Postgres only: database name to dump.'
         required: false
@@ -514,6 +523,7 @@ jobs:
           db-type: ${{ inputs.db-type }}
           db-container: ${{ inputs.db-container }}
           db-path: ${{ inputs.db-path }}
+          sqlite-functions: ${{ inputs.sqlite-functions }}
           db-name: ${{ inputs.db-name }}
           db-user: ${{ inputs.db-user }}
           snapshot-dir: ${{ inputs.snapshot-dir }}
