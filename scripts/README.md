@@ -81,6 +81,9 @@ referenced them.
 | `docker system prune -af` | Both of the above at once |
 | `docker container prune` | On the Areté box the 168h filter would delete `arilearn-phx-app_green-1`, the blue/green standby. Reclaims 5.4MB. |
 
+**Which disk.** It reports on the filesystem holding Docker's data root
+(`docker info` `DockerRootDir`). Set `DISK_PATH` to watch a different mount.
+
 **Reading the result.** Exit 1 means usage is at/over `WARN_PCT` (85) or free
 space is under `MIN_FREE_GB` (20) — actionable. Exit 4 means a prune step failed
 but the disk is fine. A monitor should read the status file rather than the log:
@@ -90,8 +93,9 @@ $HOME/.local/state/docker-prune/status.json
 ```
 
 ```json
-{"ts":"2026-08-14T17:33:42Z","host":"arete-aichat","usage_pct":52,"free_gb":92.0,
- "reclaimed_gb":0.5,"warn_pct":85,"min_free_gb":20,"exit_code":0,"breach":""}
+{"ts":"2026-08-14T17:33:42Z","host":"arete-aichat","disk_path":"/mnt/HC_Volume_103786129/docker",
+ "usage_pct":52,"free_gb":92.0,"reclaimed_gb":0.5,"warn_pct":85,"min_free_gb":20,
+ "exit_code":0,"failed_steps":"","breach":""}
 ```
 
 Written atomically, so a poller can never catch it half-written. Both thresholds

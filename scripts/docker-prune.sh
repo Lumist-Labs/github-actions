@@ -45,7 +45,6 @@
 # Step failures are tracked explicitly in FAILED_STEPS and surface as exit 4.
 set -uo pipefail
 
-DISK_PATH="${DISK_PATH:-}"
 WARN_PCT="${WARN_PCT:-85}"
 MIN_FREE_GB="${MIN_FREE_GB:-20}"
 BUILDER_UNTIL="${BUILDER_UNTIL:-24h}"
