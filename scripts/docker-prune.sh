@@ -16,8 +16,8 @@
 #   docker-prune.sh
 #
 # Environment variables (all optional):
-#   DISK_PATH      — filesystem to report on (default /mnt/HC_Volume_103786129,
-#                    the Docker data-root per /etc/docker/daemon.json)
+#   DISK_PATH      — filesystem to report on (default: the daemon's
+#                    DockerRootDir, so the same script works on any box)
 #   WARN_PCT       — usage percent that triggers a non-zero exit (default 85)
 #   MIN_FREE_GB    — absolute free GiB below which we exit non-zero (default 20)
 #   BUILDER_UNTIL  — age filter for build cache (default 24h)
@@ -45,7 +45,7 @@
 # Step failures are tracked explicitly in FAILED_STEPS and surface as exit 4.
 set -uo pipefail
 
-DISK_PATH="${DISK_PATH:-/mnt/HC_Volume_103786129}"
+DISK_PATH="${DISK_PATH:-}"
 WARN_PCT="${WARN_PCT:-85}"
 MIN_FREE_GB="${MIN_FREE_GB:-20}"
 BUILDER_UNTIL="${BUILDER_UNTIL:-24h}"
@@ -87,13 +87,16 @@ if ! [[ "$MIN_FREE_GB" =~ ^[0-9]+$ ]]; then
   echo "ERROR: MIN_FREE_GB must be an integer, got '$MIN_FREE_GB'" >&2
   exit 2
 fi
-if ! df --output=pcent "$DISK_PATH" >/dev/null 2>&1; then
-  echo "ERROR: cannot stat DISK_PATH '$DISK_PATH'" >&2
-  exit 2
-fi
 if ! docker info >/dev/null 2>&1; then
   echo "ERROR: docker daemon not reachable (in the docker group?)" >&2
   exit 3
+fi
+# The default used to be arete-aichat's volume, so on ssdnode2 (/var/lib/docker)
+# every run exited 2 and the installer refused to schedule it.
+DISK_PATH="${DISK_PATH:-$(docker info -f '{{.DockerRootDir}}')}"
+if ! df --output=pcent "$DISK_PATH" >/dev/null 2>&1; then
+  echo "ERROR: cannot stat DISK_PATH '$DISK_PATH'" >&2
+  exit 2
 fi
 
 # ── Disk helpers ───────────────────────────────────────────────────────────
