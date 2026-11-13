@@ -361,7 +361,9 @@ jobs:
             # Step 1: WAL-safe backup from prod container to a temp file inside
             # the prod container, then docker cp out to the host.
             echo "Step 1: WAL-safe backup of prod DB..."
-            docker exec "$PROD_DB_CONTAINER" python -c "
+            # -e, not a trailing DB_PATH=...: after `python -c` that is argv, so the
+            # container's own DB_PATH (or a KeyError) won over prod-db-path (#244).
+            docker exec -e DB_PATH="$PROD_DB_PATH" "$PROD_DB_CONTAINER" python -c "
             import sqlite3, os
             src = sqlite3.connect(os.environ['DB_PATH'])
             src.execute('PRAGMA wal_checkpoint(TRUNCATE)')
@@ -369,7 +371,7 @@ jobs:
             src.backup(dst)
             dst.close(); src.close()
             print('WAL-safe backup complete')
-            " DB_PATH="$PROD_DB_PATH"
+            "
 
             # Step 2: Integrity-check the snapshot inside the prod container.
             echo "Step 2: Integrity-check prod snapshot..."
