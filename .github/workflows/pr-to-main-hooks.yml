@@ -691,7 +691,8 @@ jobs:
 
           # The event payload's title and size predate the retitle step and later pushes.
           gh pr view "$PR_NUMBER" --repo "$REPO" --json title,additions,deletions,changedFiles > /tmp/card-pr.json
-          TITLE=$(jq -r '.title' /tmp/card-pr.json)
+          # The title is the notification preview, which drops the context line naming the repo.
+          TITLE="${REPO#*/} · $(jq -r '.title' /tmp/card-pr.json)"
           SIZE=$(jq -r '"+\(.additions) −\(.deletions) · \(.changedFiles) file\(if .changedFiles == 1 then "" else "s" end)"' /tmp/card-pr.json)
 
           # This job's own check run is always in progress here, so leave it out or every
