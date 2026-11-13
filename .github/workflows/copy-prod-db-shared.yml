@@ -26,7 +26,7 @@ name: Copy Prod DB to Dev (shared)
 #   1-2. Same load + Tailscale.
 #   3. pg_dump -Fc of prod DB (read-only; never writes to prod).
 #   4. pg_dump of dev DB aside (safety net).
-#   5. Drop + restore dev DB from prod dump.
+#   5. Drop and recreate dev DB (WITH FORCE), restore prod dump.
 #   6. Cleanup.
 #
 # REQUIRED CALLER PERMISSIONS
@@ -157,7 +157,10 @@ on:
         default: ''
 
       db-user:
-        description: 'Postgres only: database superuser.'
+        description: >-
+          Postgres only: database superuser. The copy drops and recreates the dev
+          DB WITH (FORCE) (Postgres 13+) and restores extensions, so it needs
+          superuser; the DB ends up owned by this role with default grants.
         required: false
         type: string
         default: ''
@@ -525,26 +528,38 @@ jobs:
             # Step 3: pg_dump dev DB aside before clobbering.
             echo "Step 3: Backing up dev DB before clobber..."
             mkdir -p "$BACKUP_DIR"
-            if docker exec "$DEV_DB_CONTAINER" pg_isready -U "$DB_USER" -d "$EFFECTIVE_DEV_DB" 2>/dev/null; then
-              docker exec "$DEV_DB_CONTAINER" \
-                pg_dump -U "$DB_USER" -Fc "$EFFECTIVE_DEV_DB" | gzip > "$HOST_DEV_BACKUP" 2>/dev/null \
-                || echo "  (dev dump failed — dev DB may not exist yet, skipping backup)"
-              if [[ -s "$HOST_DEV_BACKUP" ]]; then
-                echo "  Dev DB backed up to: $HOST_DEV_BACKUP ($(du -h "$HOST_DEV_BACKUP" | cut -f1))"
+            # Step 4 drops the DB, so an existing one must be backed up first. A
+            # failed pg_dump still leaves a non-empty .gz, hence the exit-status check.
+            DEV_DB_EXISTS=$(docker exec "$DEV_DB_CONTAINER" psql -U "$DB_USER" -d postgres -Atc \
+              "SELECT 1 FROM pg_database WHERE datname = '$EFFECTIVE_DEV_DB'")
+            if [[ "$DEV_DB_EXISTS" == 1 ]]; then
+              if ! docker exec "$DEV_DB_CONTAINER" pg_dump -U "$DB_USER" -Fc "$EFFECTIVE_DEV_DB" | gzip > "$HOST_DEV_BACKUP"; then
+                echo "::error::pg_dump of dev DB $EFFECTIVE_DEV_DB failed; not dropping it" >&2
+                exit 1
               fi
+              echo "  Dev DB backed up to: $HOST_DEV_BACKUP ($(du -h "$HOST_DEV_BACKUP" | cut -f1))"
             else
-              echo "  Dev Postgres not ready — skipping dev backup (first copy or container down)"
+              echo "  Dev DB $EFFECTIVE_DEV_DB does not exist yet; nothing to back up"
+              HOST_DEV_BACKUP="(none, first copy)"
             fi
 
             # --- WRITE DEV ---
 
-            # Step 4: Drop and restore dev DB from prod dump.
-            # gunzip streams to pg_restore via stdin; pg_restore --clean --if-exists
-            # handles the drop without a separate DROP DATABASE (avoids "other users
-            # connected" failures that a standalone DROP can hit).
-            echo "Step 4: Restoring prod dump into dev DB..."
-            gunzip -c "$HOST_PROD_DUMP" | docker exec -i "$DEV_DB_CONTAINER" \
-              pg_restore -U "$DB_USER" --clean --if-exists --no-privileges --no-owner -d "$EFFECTIVE_DEV_DB"
+            # Step 4: Recreate dev DB and restore the prod dump into it.
+            # Recreate rather than `pg_restore --clean`: --clean drops only objects in
+            # the dump, so a table a newer migration added survives, the restored
+            # schema_migrations no longer lists it, and that migration then fails with
+            # "already exists". WITH (FORCE) ends the app's connections instead of
+            # waiting on their locks. Step 3's backup is the way back if this fails.
+            echo "Step 4: Recreating dev DB and restoring prod dump..."
+            if ! { docker exec "$DEV_DB_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
+                     -c "DROP DATABASE IF EXISTS \"$EFFECTIVE_DEV_DB\" WITH (FORCE)" \
+                     -c "CREATE DATABASE \"$EFFECTIVE_DEV_DB\" OWNER \"$DB_USER\"" &&
+                   gunzip -c "$HOST_PROD_DUMP" | docker exec -i "$DEV_DB_CONTAINER" \
+                     pg_restore -U "$DB_USER" --no-privileges --no-owner -d "$EFFECTIVE_DEV_DB"; }; then
+              echo "::error::restore into $EFFECTIVE_DEV_DB failed; dev's previous DB is at $HOST_DEV_BACKUP on the VPS" >&2
+              exit 1
+            fi
 
             echo "  Restore complete."
 

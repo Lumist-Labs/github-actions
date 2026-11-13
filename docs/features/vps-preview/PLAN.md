@@ -37,7 +37,7 @@ Fails before anything touches the VPS unless:
 - `environment` is not `prod`/`production`
 
 Without it, one wrong input in a consumer shim means `compose down` on dev's shared
-compose project, or `pg_restore --clean` into dev's DB.
+compose project, or `DROP DATABASE ... WITH (FORCE)` on dev's DB.
 
 ### Seeding is explicit, not per-push
 
