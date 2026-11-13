@@ -234,7 +234,9 @@ on:
         default: ''
 
       preview-app-container:
-        description: 'SQLite: preview app container, stopped around the copy. Must end in `_preview`.'
+        description: >-
+          SQLite: space-separated preview containers with the DB file open (app,
+          worker), stopped around the copy. Each must end in `_preview`.
         required: false
         type: string
         default: ''
@@ -297,7 +299,10 @@ jobs:
             if [[ "$DB_TYPE" == sqlite ]]; then
               # Empty makes copy-prod-db-shared stop and start the whole compose
               # file without --env-file, which reaches dev if the project is dev's.
-              [[ "$PREVIEW_APP" == *_preview ]] || err "sqlite seed needs preview-app-container ending in _preview, got '$PREVIEW_APP'"
+              [[ -n "$PREVIEW_APP" ]] || err "sqlite seed needs preview-app-container"
+              for c in $PREVIEW_APP; do
+                [[ "$c" == *_preview ]] || err "preview-app-container '$c' must end in _preview"
+              done
             fi
           fi
 

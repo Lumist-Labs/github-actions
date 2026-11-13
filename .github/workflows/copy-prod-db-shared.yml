@@ -190,10 +190,10 @@ on:
 
       dev-app-container:
         description: >-
-          Dev app container name to stop before the copy and start after.
-          For sqlite only (postgres stays running). When empty the dev
-          compose-file `down`/`up` is skipped — use when the dev DB container
-          is separate from the app container.
+          SQLite only (postgres stays running): space-separated containers to
+          stop before the copy and start after: every container with the DB
+          file open, e.g. an app and its worker. Empty stops and starts the
+          whole `dev-compose-file` instead.
         required: false
         type: string
         default: ''
@@ -412,7 +412,11 @@ jobs:
             # Step 6: Stop the dev app container before copying in the new DB.
             echo "Step 6: Stopping dev app container..."
             if [[ -n "$DEV_APP_CONTAINER" ]]; then
-              docker stop "$DEV_APP_CONTAINER" 2>/dev/null || echo "  ($DEV_APP_CONTAINER not running — proceeding)"
+              # Word-split on purpose: every container with the file open (an app
+              # and its worker) must be stopped, or it writes through the old inode.
+              for c in $DEV_APP_CONTAINER; do
+                docker stop "$c" 2>/dev/null || echo "  ($c not running — proceeding)"
+              done
             else
               cd "$REPO_DIR"
               docker compose -f "$DEV_COMPOSE_FILE" stop
@@ -420,12 +424,18 @@ jobs:
 
             # Step 7: Copy the prod snapshot into the dev container's DB path.
             echo "Step 7: Copying prod snapshot into dev DB..."
+            # The old DB's -wal/-shm would otherwise sit beside the new file, and
+            # SQLite replays a WAL whose salt matches onto whatever DB it finds.
+            # The container is stopped, so remove them through its volumes.
+            DEV_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$DEV_DB_CONTAINER")
+            docker run --rm --volumes-from "$DEV_DB_CONTAINER" --entrypoint rm "$DEV_IMAGE" \
+              -f "${DEV_DB_PATH}-wal" "${DEV_DB_PATH}-shm"
             docker cp "$HOST_SNAPSHOT" "${DEV_DB_CONTAINER}:${DEV_DB_PATH}"
 
             # Step 8: Start dev app container.
             echo "Step 8: Starting dev app container..."
             if [[ -n "$DEV_APP_CONTAINER" ]]; then
-              docker start "$DEV_APP_CONTAINER"
+              for c in $DEV_APP_CONTAINER; do docker start "$c"; done
             else
               cd "$REPO_DIR"
               docker compose -f "$DEV_COMPOSE_FILE" start
