@@ -235,8 +235,20 @@ on:
 
       preview-app-container:
         description: >-
-          SQLite: space-separated preview containers with the DB file open (app,
-          worker), stopped around the copy. Each must end in `_preview`.
+          Space-separated preview containers stopped around the copy; each must
+          end in `_preview`. SQLite: every container with the DB file open, the DB
+          container included. Postgres: app/worker only (not the DB container), so
+          copied queued jobs can't run before `post-seed-command`.
+        required: false
+        type: string
+        default: ''
+
+      post-seed-command:
+        description: >-
+          Run in `repo-dir` on the VPS after the seed's restore, while
+          `preview-app-container` is stopped, e.g. deleting dev's copied queued jobs
+          so they don't run again on preview. Trusted caller code, like
+          deploy-command. Non-zero fails the seed and leaves those containers stopped.
         required: false
         type: string
         default: ''
@@ -296,16 +308,19 @@ jobs:
             case "$DB_TYPE" in postgres|sqlite) ;; *) err "seed needs db-type postgres or sqlite, got '$DB_TYPE'" ;; esac
             [[ -n "$SOURCE_DB" ]] || err "seed needs source-db-container"
             [[ "$PREVIEW_DB" == *_preview ]] || err "preview-db-container '$PREVIEW_DB' must end in _preview"
+            read -ra apps <<< "$PREVIEW_APP"
+            for c in "${apps[@]}"; do
+              [[ "$c" == *_preview ]] || err "preview-app-container '$c' must end in _preview"
+            done
             if [[ "$DB_TYPE" == sqlite ]]; then
               # Empty makes copy-prod-db-shared stop and start the whole compose
               # file without --env-file, which reaches dev if the project is dev's.
-              read -ra apps <<< "$PREVIEW_APP"
               (( ${#apps[@]} )) || err "sqlite seed needs preview-app-container"
-              for c in "${apps[@]}"; do
-                [[ "$c" == *_preview ]] || err "preview-app-container '$c' must end in _preview"
-              done
               # The copy refuses to write while the DB's own container runs.
               [[ " ${apps[*]} " == *" $PREVIEW_DB "* ]] || err "preview-app-container must include preview-db-container '$PREVIEW_DB'"
+            elif [[ " ${apps[*]} " == *" $PREVIEW_DB "* ]]; then
+              # Postgres restores through the running DB container.
+              err "postgres preview-app-container must not include preview-db-container '$PREVIEW_DB'"
             fi
           fi
 
@@ -405,6 +420,7 @@ jobs:
       dev-compose-file: ${{ inputs.compose-file }}
       dev-app-container: ${{ inputs.preview-app-container }}
       sqlite-integrity-command: ${{ inputs.sqlite-integrity-command }}
+      post-restore-command: ${{ inputs.post-seed-command }}
 
   seed-redeploy:
     needs: seed-copy
