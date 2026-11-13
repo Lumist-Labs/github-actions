@@ -17,8 +17,9 @@ tears down. Anyone with write access can also deploy, seed or tear down from the
    - override every host-derived value from dev's folder in `environment:` (`PHX_HOST`,
      OAuth issuers, public URLs)
    - `env_file: .env.preview`
-2. **Entra**: add the preview callback URLs to the app's `redirect_uris` in
-   `microsoft-entra-terraform-infrastructure`. Entra matches exactly; there are no wildcards.
+2. **Entra**: nothing to add. In `microsoft-entra-terraform-infrastructure`, `modules/app_registration`
+   gives every `<label>.lumistlabs.dev` redirect URI a `preview.<label>.lumistlabs.dev` sibling on
+   the dev registration (never prod). An app with no `lumistlabs.dev` URI gets none.
 3. **DNS**: `*.lumistlabs.dev` points at the VPS already. Check with `dig +short preview.<app>.lumistlabs.dev`.
 4. **Shim** `.github/workflows/deploy-preview.yml` on `develop`:
 
@@ -76,8 +77,9 @@ jobs:
 ```
 
 5. **Branch protection** comes from the org `preview` ruleset (`lumist-terraform-infrastructure/github/rulesets.tf`):
-   PR required, no deletion, only core force-pushes.
-   Create the branch once: `git push origin origin/develop:refs/heads/preview`.
+   PR required, no deletion, no force push, no bypass. Create the branch before the ruleset
+   reaches the repo, since a PR rule may refuse creating it by push:
+   `git push origin origin/develop:refs/heads/preview`.
 
 ## Using it
 
@@ -86,7 +88,7 @@ jobs:
 | Show a feature | PR it into `preview`, merge |
 | Dev data in preview | Actions → Preview → `seed`. Deploys, copies dev's DB over preview's, redeploys with `--force-recreate` so the branch's migrations apply on top. Run after the first deploy and whenever you want fresh data |
 | Take it down | Actions → Preview → `teardown`, or merge `preview` into `develop`. Volumes are kept; the next deploy comes back with the old preview data |
-| Reset `preview` to `develop` | core only: `git push --force origin origin/develop:preview` |
+| Catch `preview` up with `develop` | PR `develop` → `preview`. Nobody can force-push it, so work abandoned on `preview` has to be reverted there |
 
 ## What the guard refuses
 

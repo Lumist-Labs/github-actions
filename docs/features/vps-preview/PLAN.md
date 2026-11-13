@@ -62,10 +62,8 @@ First push brings up an empty, migrated DB.
   `workflow_dispatch` with an `action` choice (`deploy` / `seed` / `teardown`)
 - DNS: none needed. `dig +short preview.lumilearn.lumistlabs.dev` already returns the VPS
   (178.156.139.78), same as `lumilearn.lumistlabs.dev`
-- Entra: add `https://preview.lumilearn.lumistlabs.dev/auth/user/microsoft/callback` and
-  `.../auth/callback` to `redirect_uris` in `microsoft-entra-terraform-infrastructure`
-  `apps/arilearn/main.tf`. Entra matches exactly, no wildcards, so every opting-in app
-  needs its own entry
+- Entra: generated. `modules/app_registration` adds a `preview.` sibling for every
+  `<label>.lumistlabs.dev` URI on dev registrations (microsoft-entra-terraform-infrastructure#196)
 
 ### Access
 
@@ -94,8 +92,8 @@ so opting in later needs no change):
 - `deletion = true`: the deploy target can't vanish under a running stack
 - `pull_request` with `required_approving_review_count = 0`: every change lands as a PR
   (visible, CI runs), no approval gate, since preview is for unfinished work
-- `non_fast_forward = true` with `core` as a bypass actor: nobody else force-pushes,
-  but core can reset `preview` to `develop` after a promotion (the branch-drift item below)
+- `non_fast_forward = true`, no bypass actor. A bypass covers every rule in the ruleset,
+  deletion included, so a core merge of `preview` → `develop` could auto-delete the branch
 
 Note this ruleset only covers the Lumist-Labs org. aretecp repos (areteos) would need
 the same resource in whatever manages that org; not checked.
