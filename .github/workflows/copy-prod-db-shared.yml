@@ -193,10 +193,11 @@ on:
 
       dev-app-container:
         description: >-
-          SQLite only (postgres stays running): space-separated containers to
-          stop before the copy and start after: every container with the DB
-          file open, e.g. an app and its worker. Empty stops and starts the
-          whole `dev-compose-file` instead.
+          Space-separated containers to stop before the restore and start after.
+          SQLite: every container with the DB file open (app, worker); empty stops
+          and starts the whole `dev-compose-file`. Postgres: optional app/worker
+          containers (never the DB container), so restored queued jobs can't run
+          before `post-restore-command`.
         required: false
         type: string
         default: ''
@@ -212,6 +213,15 @@ on:
         default: ''
 
       # --- Safety net --------------------------------------------------------
+
+      post-restore-command:
+        description: >-
+          Run in `repo-dir` on the VPS after the restore, while `dev-app-container`
+          is still stopped, e.g. clearing copied queued jobs. A non-zero exit fails
+          the copy (the containers are started again first).
+        required: false
+        type: string
+        default: ''
 
       dev-backup-dir:
         description: >-
@@ -334,6 +344,7 @@ jobs:
           PROD_DB_PATH: ${{ inputs.prod-db-path }}
           DEV_DB_PATH: ${{ inputs.dev-db-path }}
           SQLITE_INTEGRITY_COMMAND: ${{ inputs.sqlite-integrity-command }}
+          POST_RESTORE_COMMAND: ${{ inputs.post-restore-command }}
           DEV_COMPOSE_FILE: ${{ inputs.dev-compose-file }}
           DEV_APP_CONTAINER: ${{ inputs.dev-app-container }}
           DEV_BACKUP_DIR: ${{ inputs.dev-backup-dir }}
@@ -341,7 +352,7 @@ jobs:
           host: ${{ env.VPS_TAILSCALE_IP }}
           username: ${{ inputs.vps-user }}
           key: ${{ env.VPS_SSH_KEY }}
-          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,PROD_DB_PATH,DEV_DB_PATH,SQLITE_INTEGRITY_COMMAND,DEV_COMPOSE_FILE,DEV_APP_CONTAINER,DEV_BACKUP_DIR
+          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,PROD_DB_PATH,DEV_DB_PATH,SQLITE_INTEGRITY_COMMAND,DEV_COMPOSE_FILE,DEV_APP_CONTAINER,DEV_BACKUP_DIR,POST_RESTORE_COMMAND
           command_timeout: 10m
           script: |
             set -euo pipefail
@@ -450,6 +461,10 @@ jobs:
               false
             fi
             docker cp "$HOST_SNAPSHOT" "${DEV_DB_CONTAINER}:${DEV_DB_PATH}"
+            if [[ -n "$POST_RESTORE_COMMAND" ]]; then
+              echo "Post-restore: $POST_RESTORE_COMMAND"
+              (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND")
+            fi
 
             # Step 8: Start the dev containers.
             echo "Step 8: Starting dev containers..."
@@ -478,11 +493,13 @@ jobs:
           PROD_DB_NAME: ${{ inputs.prod-db-name }}
           DEV_DB_NAME: ${{ inputs.dev-db-name }}
           DEV_BACKUP_DIR: ${{ inputs.dev-backup-dir }}
+          DEV_APP_CONTAINER: ${{ inputs.dev-app-container }}
+          POST_RESTORE_COMMAND: ${{ inputs.post-restore-command }}
         with:
           host: ${{ env.VPS_TAILSCALE_IP }}
           username: ${{ inputs.vps-user }}
           key: ${{ env.VPS_SSH_KEY }}
-          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,DB_NAME,DB_USER,PROD_DB_NAME,DEV_DB_NAME,DEV_BACKUP_DIR
+          envs: REPO_DIR,PROD_DB_CONTAINER,DEV_DB_CONTAINER,DB_NAME,DB_USER,PROD_DB_NAME,DEV_DB_NAME,DEV_BACKUP_DIR,DEV_APP_CONTAINER,POST_RESTORE_COMMAND
           command_timeout: 15m
           script: |
             set -euo pipefail
@@ -551,6 +568,12 @@ jobs:
             # schema_migrations no longer lists it, and that migration then fails with
             # "already exists". WITH (FORCE) ends the app's connections instead of
             # waiting on their locks. Step 3's backup is the way back if this fails.
+            read -ra DEV_APPS <<< "$DEV_APP_CONTAINER"
+            start_dev() { for c in "${DEV_APPS[@]}"; do docker start "$c" || echo "::error::could not start $c"; done; }
+            # A failure between stop and start would otherwise leave dev down.
+            trap start_dev ERR
+            for c in "${DEV_APPS[@]}"; do docker stop "$c"; done
+
             echo "Step 4: Recreating dev DB and restoring prod dump..."
             if ! { docker exec "$DEV_DB_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
                      -c "DROP DATABASE IF EXISTS \"$EFFECTIVE_DEV_DB\" WITH (FORCE)" \
@@ -558,10 +581,17 @@ jobs:
                    gunzip -c "$HOST_PROD_DUMP" | docker exec -i "$DEV_DB_CONTAINER" \
                      pg_restore -U "$DB_USER" --no-privileges --no-owner -d "$EFFECTIVE_DEV_DB"; }; then
               echo "::error::restore into $EFFECTIVE_DEV_DB failed; dev's previous DB is at $HOST_DEV_BACKUP on the VPS" >&2
+              start_dev
               exit 1
             fi
 
             echo "  Restore complete."
+            if [[ -n "$POST_RESTORE_COMMAND" ]]; then
+              echo "Post-restore: $POST_RESTORE_COMMAND"
+              (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND")
+            fi
+            trap - ERR
+            start_dev
 
             # Step 5: Cleanup host temp files.
             echo "Step 5: Cleaning up..."
