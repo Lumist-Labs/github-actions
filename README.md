@@ -27,6 +27,7 @@ file's `inputs:` block and header comment are the contract.
 | [`deploy-vps-shared.yml`](.github/workflows/deploy-vps-shared.yml) | Render the app's Infisical folder to `.env`, write it to the VPS, `docker compose up`, healthcheck. Callers are short shims. |
 | [`rollback-vps-shared.yml`](.github/workflows/rollback-vps-shared.yml) | Redeploy a previous tag, optionally restoring the latest pre-deploy DB snapshot (`confirm: RESTORE-DB`). |
 | [`copy-prod-db-shared.yml`](.github/workflows/copy-prod-db-shared.yml) | Copy the prod DB over dev on the same VPS. Prod is read-only; needs `confirm: CLOBBER-DEV`. |
+| [`preview-vps-shared.yml`](.github/workflows/preview-vps-shared.yml) | A `preview` branch beside dev on the same VPS: `deploy`, `seed` (dev DB → preview DB), `teardown`. Refuses a `repo-dir` not ending in `-preview`. |
 | [`release-shared.yml`](.github/workflows/release-shared.yml) | semantic-release on `main`, then dispatch the caller's deploy workflow. `ci-gated: true` tags only a CI-passed SHA. |
 | [`pr-to-main-hooks.yml`](.github/workflows/pr-to-main-hooks.yml) | Every PR: retitle as `… → <base>`. PRs into `main`/`master`: Claude summary into the body, `Closes #N`, request `core` review, Slack card to `#devs-prs` with the full summary in its thread. |
 | [`claude-issue-triage.yml`](.github/workflows/claude-issue-triage.yml) | Triage new issues and `@claude` comments with Claude Code. Callers pass no inputs; see [zero-config shim](#zero-config-consumer-shim). |

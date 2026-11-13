@@ -109,6 +109,7 @@ lives at `lumist-labs-internal/prod/github-actions`, separate from app keys.
 | [`docs/architecture.md`](docs/architecture.md) | How workflows, composites and scripts connect; Autopilot end to end; consumer map |
 | [`docs/runbooks/runners-and-ci.md`](docs/runbooks/runners-and-ci.md) | Runner rule, concurrency policy, self-hosted traps. Read before touching a workflow |
 | [`docs/runbooks/issue-autopilot.md`](docs/runbooks/issue-autopilot.md) | Autopilot gate, labels, adding a repo |
+| [`docs/runbooks/vps-preview.md`](docs/runbooks/vps-preview.md) | Preview branches: adding a repo, seed, teardown |
 | [`docs/runbooks/deploy-vps-migration.md`](docs/runbooks/deploy-vps-migration.md) | Moving a repo onto `deploy-vps-shared.yml` |
 | [`docs/runbooks/entra-secret-detector.md`](docs/runbooks/entra-secret-detector.md) | The daily Entra credential scan |
 | [`RELEASING.md`](RELEASING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md) | Release procedure; action conventions and bump rules |
