@@ -39,11 +39,6 @@ on:
         options: [deploy, seed, teardown]
         default: deploy
 
-# One run at a time. A push and a seed on the same checkout would race.
-concurrency:
-  group: preview
-  cancel-in-progress: false
-
 permissions:
   contents: read
   id-token: write
@@ -53,7 +48,14 @@ jobs:
     # On pull_request, only a merged `preview` → develop PR (teardown).
     if: >-
       github.event_name != 'pull_request' ||
-      (github.event.pull_request.merged && github.event.pull_request.head.ref == 'preview')
+      (github.event.pull_request.merged && github.event.pull_request.head.ref == 'preview' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    # One run at a time: a push and a seed on the same checkout would race.
+    # Job level: at workflow level, the skipped run every PR closed into develop
+    # starts would take the pending slot and cancel a queued push or seed.
+    concurrency:
+      group: preview
+      cancel-in-progress: false
     uses: Lumist-Labs/github-actions/.github/workflows/preview-vps-shared.yml@v2
     with:
       action: ${{ github.event_name == 'pull_request' && 'teardown' || inputs.action || 'deploy' }}
@@ -86,7 +88,7 @@ jobs:
 | Want | Do |
 |---|---|
 | Show a feature | PR it into `preview`, merge |
-| Dev data in preview | Actions → Preview → `seed`. Deploys, copies dev's DB over preview's, redeploys with `--force-recreate` so the branch's migrations apply on top. Run after the first deploy and whenever you want fresh data |
+| Dev data in preview | Actions → Preview → `seed`. Deploys, drops and recreates preview's DB from dev's (ending its connections), redeploys with `--force-recreate` so the branch's migrations apply on top. Run after the first deploy and whenever you want fresh data |
 | Take it down | Actions → Preview → `teardown`, or merge `preview` into `develop`. Volumes are kept; the next deploy comes back with the old preview data |
 | Catch `preview` up with `develop` | PR `develop` → `preview`. Nobody can force-push it, so work abandoned on `preview` has to be reverted there |
 

@@ -14,7 +14,7 @@ name: Preview on VPS (shared)
 # Isolation from dev comes from the consumer's inputs: its own `repo-dir` (own
 # checkout, compose project and concurrency group) and its own compose file with
 # `_preview` containers. The guard job refuses inputs that break that, because
-# one wrong value here means `compose down` or `pg_restore --clean` against dev.
+# one wrong value here means `compose down` or `DROP DATABASE ... WITH (FORCE)` against dev.
 #
 # Seeding is explicit: re-seeding on every push would wipe what testers did.
 #
@@ -234,7 +234,9 @@ on:
         default: ''
 
       preview-app-container:
-        description: 'SQLite: preview app container, stopped around the copy. Must end in `_preview`.'
+        description: >-
+          SQLite: space-separated preview containers with the DB file open (app,
+          worker), stopped around the copy. Each must end in `_preview`.
         required: false
         type: string
         default: ''
@@ -297,7 +299,13 @@ jobs:
             if [[ "$DB_TYPE" == sqlite ]]; then
               # Empty makes copy-prod-db-shared stop and start the whole compose
               # file without --env-file, which reaches dev if the project is dev's.
-              [[ "$PREVIEW_APP" == *_preview ]] || err "sqlite seed needs preview-app-container ending in _preview, got '$PREVIEW_APP'"
+              read -ra apps <<< "$PREVIEW_APP"
+              (( ${#apps[@]} )) || err "sqlite seed needs preview-app-container"
+              for c in "${apps[@]}"; do
+                [[ "$c" == *_preview ]] || err "preview-app-container '$c' must end in _preview"
+              done
+              # The copy refuses to write while the DB's own container runs.
+              [[ " ${apps[*]} " == *" $PREVIEW_DB "* ]] || err "preview-app-container must include preview-db-container '$PREVIEW_DB'"
             fi
           fi
 
