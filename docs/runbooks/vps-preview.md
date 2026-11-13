@@ -88,7 +88,7 @@ jobs:
 | Want | Do |
 |---|---|
 | Show a feature | PR it into `preview`, merge |
-| Dev data in preview | Actions → Preview → `seed`. Deploys, copies dev's DB over preview's, redeploys with `--force-recreate` so the branch's migrations apply on top. Run after the first deploy and whenever you want fresh data |
+| Dev data in preview | Actions → Preview → `seed`. Deploys, drops and recreates preview's DB from dev's (ending its connections), redeploys with `--force-recreate` so the branch's migrations apply on top. Run after the first deploy and whenever you want fresh data |
 | Take it down | Actions → Preview → `teardown`, or merge `preview` into `develop`. Volumes are kept; the next deploy comes back with the old preview data |
 | Catch `preview` up with `develop` | PR `develop` → `preview`. Nobody can force-push it, so work abandoned on `preview` has to be reverted there |
 

@@ -14,7 +14,7 @@ name: Preview on VPS (shared)
 # Isolation from dev comes from the consumer's inputs: its own `repo-dir` (own
 # checkout, compose project and concurrency group) and its own compose file with
 # `_preview` containers. The guard job refuses inputs that break that, because
-# one wrong value here means `compose down` or `pg_restore --clean` against dev.
+# one wrong value here means `compose down` or `DROP DATABASE ... WITH (FORCE)` against dev.
 #
 # Seeding is explicit: re-seeding on every push would wipe what testers did.
 #
