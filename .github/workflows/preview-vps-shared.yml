@@ -1,0 +1,503 @@
+name: Preview on VPS (shared)
+
+# A second, disposable copy of an app's dev stack on the same VPS, running a
+# `preview` branch against a snapshot of dev's database. Consumers call:
+#   uses: Lumist-Labs/github-actions/.github/workflows/preview-vps-shared.yml@v2
+#
+#   action: deploy   → deploy-vps-shared against the preview checkout
+#   action: seed     → copy dev's DB into the preview DB (copy-prod-db-shared, with
+#                      dev as its read-only source side), then redeploy with
+#                      --force-recreate so the branch's migrations re-apply on top
+#                      of dev's schema
+#   action: teardown → `compose down` in the preview checkout
+#
+# Isolation from dev comes from the consumer's inputs: its own `repo-dir` (own
+# checkout, compose project and concurrency group) and its own compose file with
+# `_preview` containers. The guard job refuses inputs that break that, because
+# one wrong value here means `compose down` or `pg_restore --clean` against dev.
+#
+# Seeding is explicit: re-seeding on every push would wipe what testers did.
+#
+# REQUIRED CALLER PERMISSIONS
+#   permissions:
+#     id-token: write
+#     contents: read
+
+on:
+  workflow_call:
+    inputs:
+      action:
+        description: '`deploy`, `seed` or `teardown`.'
+        required: true
+        type: string
+
+      environment:
+        description: >-
+          GitHub environment name. Must be the one dev deploys under: the Infisical
+          identity's trust policy matches on it. `prod`/`production` are refused.
+        required: true
+        type: string
+
+      infisical-identity-id:
+        description: Infisical OIDC machine identity UUID.
+        required: true
+        type: string
+
+      shared-project-slug:
+        description: Infisical project slug holding shared folders and the infra folder.
+        required: true
+        type: string
+
+      app-project-slug:
+        description: Infisical project slug holding the app's secrets folder.
+        required: true
+        type: string
+
+      env-slug:
+        description: Infisical environment the preview loads. `prod` is refused.
+        required: false
+        type: string
+        default: dev
+
+      app-path:
+        description: The app's Infisical folder, the same one dev uses.
+        required: true
+        type: string
+
+      extra-shared-path-1:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: ''
+
+      extra-shared-path-2:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: ''
+
+      extra-shared-path-3:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: ''
+
+      infra-path:
+        description: Infisical folder holding TAILSCALE_AUTHKEY, VPS_TAILSCALE_IP, VPS_SSH_KEY.
+        required: false
+        type: string
+        default: /tailscale
+
+      vps-user:
+        description: SSH user on the VPS.
+        required: true
+        type: string
+
+      repo-dir:
+        description: >-
+          Preview checkout on the VPS. Must end in `-preview` and must not be dev's
+          directory (e.g. `/home/sglyon/arilearn-phx-preview`).
+        required: true
+        type: string
+
+      repo-url:
+        description: Git clone URL, for the first deploy.
+        required: false
+        type: string
+        default: ''
+
+      compose-file:
+        description: >-
+          The preview compose file, relative to `repo-dir`. Containers must end in
+          `_preview`, and Traefik must route the preview host, not `${PHX_HOST}`
+          from dev's folder.
+        required: true
+        type: string
+
+      env-file-name:
+        description: Rendered env file, relative to `repo-dir`.
+        required: false
+        type: string
+        default: .env.preview
+
+      ref:
+        description: Branch to deploy.
+        required: false
+        type: string
+        default: preview
+
+      compose-build:
+        description: See deploy-vps-shared.
+        required: false
+        type: boolean
+        default: true
+
+      compose-up-timeout:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: 30m
+
+      compose-force-recreate:
+        description: >-
+          See deploy-vps-shared. `seed` always recreates regardless, so containers
+          that migrate on boot run against the restored DB.
+        required: false
+        type: boolean
+        default: false
+
+      healthcheck-containers:
+        description: Preview containers that must reach `healthy`.
+        required: false
+        type: string
+        default: ''
+
+      required-keys:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: ''
+
+      deploy-command:
+        description: >-
+          See deploy-vps-shared. `seed` ignores `compose-force-recreate` when this
+          is set, so the command must recreate (or migrate) by itself.
+        required: false
+        type: string
+        default: ''
+
+      post-deploy-command:
+        description: See deploy-vps-shared.
+        required: false
+        type: string
+        default: ''
+
+      # --- seed ---------------------------------------------------------------
+      db-type:
+        description: '`postgres` or `sqlite`. Required for `seed`.'
+        required: false
+        type: string
+        default: ''
+
+      source-db-container:
+        description: Dev's DB container (postgres) or the container mounting dev's DB file (sqlite). Read only.
+        required: false
+        type: string
+        default: ''
+
+      preview-db-container:
+        description: The preview DB container that gets overwritten. Must end in `_preview`.
+        required: false
+        type: string
+        default: ''
+
+      db-name:
+        description: 'Postgres: database name, when dev and preview use the same one.'
+        required: false
+        type: string
+        default: ''
+
+      source-db-name:
+        description: "Postgres: dev's database name, when it differs from preview's."
+        required: false
+        type: string
+        default: ''
+
+      preview-db-name:
+        description: "Postgres: preview's database name, when it differs from dev's."
+        required: false
+        type: string
+        default: ''
+
+      db-user:
+        description: 'Postgres: user for pg_dump / pg_restore.'
+        required: false
+        type: string
+        default: ''
+
+      source-db-path:
+        description: "SQLite: dev's DB file inside `source-db-container`."
+        required: false
+        type: string
+        default: ''
+
+      preview-db-path:
+        description: "SQLite: preview's DB file inside `preview-db-container`."
+        required: false
+        type: string
+        default: ''
+
+      sqlite-integrity-command:
+        description: 'SQLite: see copy-prod-db-shared. Needed when indexes use app-defined functions.'
+        required: false
+        type: string
+        default: ''
+
+      preview-app-container:
+        description: 'SQLite: preview app container, stopped around the copy. Must end in `_preview`.'
+        required: false
+        type: string
+        default: ''
+
+      # --- teardown -----------------------------------------------------------
+      delete-data:
+        description: '`teardown` only: also remove the preview volumes (`down -v`).'
+        required: false
+        type: boolean
+        default: false
+
+      runner:
+        description: GitHub-hosted image or self-hosted label.
+        required: false
+        type: string
+        default: ubuntu-latest
+
+# No workflow-level concurrency: deploy-vps-shared and copy-prod-db-shared set
+# their own from `github.workflow`, which inside a nested call is still the
+# caller's name. A group here built the same way would make the nested deploy
+# wait on this run, forever. Teardown takes the same target-scoped job group they
+# use, so it queues behind a deploy or seed on the same checkout.
+
+jobs:
+  guard:
+    name: Check preview inputs
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - name: Refuse inputs that could reach dev or prod
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          ENV_SLUG: ${{ inputs.env-slug }}
+          REPO_DIR: ${{ inputs.repo-dir }}
+          DB_TYPE: ${{ inputs.db-type }}
+          SOURCE_DB: ${{ inputs.source-db-container }}
+          PREVIEW_DB: ${{ inputs.preview-db-container }}
+          PREVIEW_APP: ${{ inputs.preview-app-container }}
+          COMPOSE_FILE: ${{ inputs.compose-file }}
+          ENV_FILE: ${{ inputs.env-file-name }}
+        run: |
+          set -euo pipefail
+          fail=0
+          err() { echo "::error::$1"; fail=1; }
+
+          case "$ACTION" in deploy|seed|teardown) ;; *) err "action must be deploy, seed or teardown, got '$ACTION'" ;; esac
+          case "${ENVIRONMENT,,}" in prod|production) err "environment '$ENVIRONMENT' is prod; previews run on dev" ;; esac
+          case "${ENV_SLUG,,}" in prod|production) err "env-slug '$ENV_SLUG' would load prod secrets" ;; esac
+          [[ "${REPO_DIR%/}" == *-preview ]] || err "repo-dir '$REPO_DIR' must end in -preview"
+          # Both are joined onto repo-dir on the VPS; `../app/.env.dev` would write dev's env file.
+          for f in "$COMPOSE_FILE" "$ENV_FILE"; do
+            [[ "$f" != /* && "$f" != *..* ]] || err "'$f' must be a path inside repo-dir"
+          done
+
+          if [[ "$ACTION" == seed ]]; then
+            case "$DB_TYPE" in postgres|sqlite) ;; *) err "seed needs db-type postgres or sqlite, got '$DB_TYPE'" ;; esac
+            [[ -n "$SOURCE_DB" ]] || err "seed needs source-db-container"
+            [[ "$PREVIEW_DB" == *_preview ]] || err "preview-db-container '$PREVIEW_DB' must end in _preview"
+            if [[ "$DB_TYPE" == sqlite ]]; then
+              # Empty makes copy-prod-db-shared stop and start the whole compose
+              # file without --env-file, which reaches dev if the project is dev's.
+              [[ "$PREVIEW_APP" == *_preview ]] || err "sqlite seed needs preview-app-container ending in _preview, got '$PREVIEW_APP'"
+            fi
+          fi
+
+          exit "$fail"
+
+      # deploy-vps-shared does checkout, env write and `compose up` in one job, so
+      # the project name can't be checked on the VPS in between. The compose file
+      # is what decides it: a top-level `name:` copied from dev's file puts preview
+      # in dev's project, and `up --force-recreate` then rebuilds dev from this
+      # branch. Without `name:`, the project is repo-dir's basename, checked above.
+      - name: Read the compose file on the branch being deployed
+        if: inputs.action != 'teardown'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref }}
+          sparse-checkout: ${{ inputs.compose-file }}
+          sparse-checkout-cone-mode: false
+          path: preview-src
+
+      - name: Refuse a compose project not ending in -preview
+        if: inputs.action != 'teardown'
+        shell: bash
+        env:
+          COMPOSE_FILE: preview-src/${{ inputs.compose-file }}
+        run: |
+          set -euo pipefail
+          project=$(sed -n 's/^name:[[:space:]]*//p' "$COMPOSE_FILE" | head -1 | tr -d "\"'")
+          if [[ -n "$project" && "$project" != *-preview ]]; then
+            echo "::error file=$COMPOSE_FILE::top-level name '$project' does not end in -preview; preview would share that compose project"
+            exit 1
+          fi
+
+  deploy:
+    needs: guard
+    # seed deploys first too: the preview DB container must exist, and the
+    # copy should run against this ref's compose file, not a stale checkout.
+    if: inputs.action == 'deploy' || inputs.action == 'seed'
+    permissions:
+      id-token: write
+      contents: read
+    uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+    with:
+      environment: ${{ inputs.environment }}
+      runner: ${{ inputs.runner }}
+      infisical-identity-id: ${{ inputs.infisical-identity-id }}
+      shared-project-slug: ${{ inputs.shared-project-slug }}
+      app-project-slug: ${{ inputs.app-project-slug }}
+      env-slug: ${{ inputs.env-slug }}
+      app-path: ${{ inputs.app-path }}
+      extra-shared-path-1: ${{ inputs.extra-shared-path-1 }}
+      extra-shared-path-2: ${{ inputs.extra-shared-path-2 }}
+      extra-shared-path-3: ${{ inputs.extra-shared-path-3 }}
+      infra-path: ${{ inputs.infra-path }}
+      vps-user: ${{ inputs.vps-user }}
+      repo-dir: ${{ inputs.repo-dir }}
+      repo-url: ${{ inputs.repo-url }}
+      compose-file: ${{ inputs.compose-file }}
+      compose-build: ${{ inputs.compose-build }}
+      compose-up-timeout: ${{ inputs.compose-up-timeout }}
+      compose-force-recreate: ${{ inputs.compose-force-recreate }}
+      env-file-name: ${{ inputs.env-file-name }}
+      ref: ${{ inputs.ref }}
+      allow-clone: true
+      healthcheck-containers: ${{ inputs.healthcheck-containers }}
+      required-keys: ${{ inputs.required-keys }}
+      deploy-command: ${{ inputs.deploy-command }}
+      post-deploy-command: ${{ inputs.post-deploy-command }}
+
+  seed-copy:
+    needs: deploy
+    if: inputs.action == 'seed'
+    permissions:
+      id-token: write
+      contents: read
+    # copy-prod-db-shared's `prod-*` inputs are its read-only source side and its
+    # `dev-*` inputs the side it overwrites; here that is dev → preview.
+    uses: Lumist-Labs/github-actions/.github/workflows/copy-prod-db-shared.yml@v2
+    with:
+      environment: ${{ inputs.environment }}
+      confirm: CLOBBER-DEV
+      runner: ${{ inputs.runner }}
+      infisical-identity-id: ${{ inputs.infisical-identity-id }}
+      shared-project-slug: ${{ inputs.shared-project-slug }}
+      env-slug: ${{ inputs.env-slug }}
+      infra-path: ${{ inputs.infra-path }}
+      vps-user: ${{ inputs.vps-user }}
+      repo-dir: ${{ inputs.repo-dir }}
+      db-type: ${{ inputs.db-type }}
+      prod-db-container: ${{ inputs.source-db-container }}
+      dev-db-container: ${{ inputs.preview-db-container }}
+      prod-db-path: ${{ inputs.source-db-path }}
+      dev-db-path: ${{ inputs.preview-db-path }}
+      db-name: ${{ inputs.db-name }}
+      prod-db-name: ${{ inputs.source-db-name }}
+      dev-db-name: ${{ inputs.preview-db-name }}
+      db-user: ${{ inputs.db-user }}
+      dev-compose-file: ${{ inputs.compose-file }}
+      dev-app-container: ${{ inputs.preview-app-container }}
+      sqlite-integrity-command: ${{ inputs.sqlite-integrity-command }}
+
+  seed-redeploy:
+    needs: seed-copy
+    permissions:
+      id-token: write
+      contents: read
+    uses: Lumist-Labs/github-actions/.github/workflows/deploy-vps-shared.yml@v2
+    with:
+      environment: ${{ inputs.environment }}
+      runner: ${{ inputs.runner }}
+      infisical-identity-id: ${{ inputs.infisical-identity-id }}
+      shared-project-slug: ${{ inputs.shared-project-slug }}
+      app-project-slug: ${{ inputs.app-project-slug }}
+      env-slug: ${{ inputs.env-slug }}
+      app-path: ${{ inputs.app-path }}
+      extra-shared-path-1: ${{ inputs.extra-shared-path-1 }}
+      extra-shared-path-2: ${{ inputs.extra-shared-path-2 }}
+      extra-shared-path-3: ${{ inputs.extra-shared-path-3 }}
+      infra-path: ${{ inputs.infra-path }}
+      vps-user: ${{ inputs.vps-user }}
+      repo-dir: ${{ inputs.repo-dir }}
+      repo-url: ${{ inputs.repo-url }}
+      compose-file: ${{ inputs.compose-file }}
+      compose-build: ${{ inputs.compose-build }}
+      compose-up-timeout: ${{ inputs.compose-up-timeout }}
+      compose-force-recreate: true
+      env-file-name: ${{ inputs.env-file-name }}
+      ref: ${{ inputs.ref }}
+      allow-clone: true
+      healthcheck-containers: ${{ inputs.healthcheck-containers }}
+      required-keys: ${{ inputs.required-keys }}
+      deploy-command: ${{ inputs.deploy-command }}
+      post-deploy-command: ${{ inputs.post-deploy-command }}
+
+  teardown:
+    needs: guard
+    if: inputs.action == 'teardown'
+    name: Tear down preview
+    runs-on: ${{ inputs.runner }}
+    environment: ${{ inputs.environment }}
+    # Same target-scoped key as deploy-vps-shared, so this never interleaves with
+    # a deploy or seed on the same checkout.
+    concurrency:
+      group: vps-${{ github.repository }}-${{ inputs.vps-user }}-${{ inputs.repo-dir }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Load infra secrets from Infisical
+        uses: Lumist-Labs/github-actions/actions/load-infisical-secrets@v2
+        with:
+          method: oidc
+          identity-id: ${{ inputs.infisical-identity-id }}
+          project-slug: ${{ inputs.shared-project-slug }}
+          environment: ${{ inputs.env-slug }}
+          path: ${{ inputs.infra-path }}
+          recursive: 'true'
+          include-imports: 'true'
+          export-as-env: 'true'
+
+      - name: Connect to Tailscale
+        uses: Lumist-Labs/github-actions/actions/tailscale-connect@v2
+        with:
+          authkey: ${{ env.TAILSCALE_AUTHKEY }}
+
+      - name: Compose down on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          REPO_DIR: ${{ inputs.repo-dir }}
+          COMPOSE_FILE: ${{ inputs.compose-file }}
+          ENV_FILE: ${{ inputs.env-file-name }}
+          DELETE_DATA: ${{ inputs.delete-data }}
+        with:
+          host: ${{ env.VPS_TAILSCALE_IP }}
+          username: ${{ inputs.vps-user }}
+          key: ${{ env.VPS_SSH_KEY }}
+          envs: REPO_DIR,COMPOSE_FILE,ENV_FILE,DELETE_DATA
+          script: |
+            set -euo pipefail
+            for f in "$COMPOSE_FILE" "$ENV_FILE"; do
+              if [[ ! -f "$REPO_DIR/$f" ]]; then
+                echo "Nothing to tear down: $REPO_DIR/$f does not exist (never deployed?)."
+                exit 0
+              fi
+            done
+            cd "$REPO_DIR"
+            args=(--env-file "$ENV_FILE" -f "$COMPOSE_FILE")
+
+            # A compose file copied from dev keeps any top-level `name:`, which
+            # would put preview in dev's project; `down` then removes dev's network
+            # and, with -v, its volumes.
+            project=$(docker compose "${args[@]}" config | sed -n 's/^name: //p' | head -1)
+            if [[ "$project" != *-preview ]]; then
+              echo "::error::compose project '$project' does not end in -preview; refusing to tear it down" >&2
+              exit 1
+            fi
+
+            if [[ "$DELETE_DATA" == true ]]; then
+              docker compose "${args[@]}" down -v
+            else
+              docker compose "${args[@]}" down
+            fi
+            echo "Preview project $project is down (volumes deleted: $DELETE_DATA)."
