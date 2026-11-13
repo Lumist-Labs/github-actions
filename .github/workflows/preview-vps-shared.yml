@@ -299,10 +299,13 @@ jobs:
             if [[ "$DB_TYPE" == sqlite ]]; then
               # Empty makes copy-prod-db-shared stop and start the whole compose
               # file without --env-file, which reaches dev if the project is dev's.
-              [[ -n "$PREVIEW_APP" ]] || err "sqlite seed needs preview-app-container"
-              for c in $PREVIEW_APP; do
+              read -ra apps <<< "$PREVIEW_APP"
+              (( ${#apps[@]} )) || err "sqlite seed needs preview-app-container"
+              for c in "${apps[@]}"; do
                 [[ "$c" == *_preview ]] || err "preview-app-container '$c' must end in _preview"
               done
+              # The copy refuses to write while the DB's own container runs.
+              [[ " ${apps[*]} " == *" $PREVIEW_DB "* ]] || err "preview-app-container must include preview-db-container '$PREVIEW_DB'"
             fi
           fi
 

@@ -16,9 +16,9 @@ name: Copy Prod DB to Dev (shared)
 #   3. WAL-safe `.backup()` of prod DB → integrity-check.
 #   4. Back up dev's current DB aside (move-aside safety net — not present in
 #      per-repo workflows today; enforced centrally here).
-#   5. Stop dev app container.
+#   5. Stop the dev containers holding the DB file.
 #   6. Copy prod snapshot into dev DB path.
-#   7. Start dev app container.
+#   7. Start them again (also on failure, so dev isn't left down).
 #   8. Cleanup temp snapshot.
 #   9. Healthcheck dev containers.
 #
@@ -409,17 +409,28 @@ jobs:
 
             # --- WRITE DEV ---
 
-            # Step 6: Stop the dev app container before copying in the new DB.
-            echo "Step 6: Stopping dev app container..."
-            if [[ -n "$DEV_APP_CONTAINER" ]]; then
-              # Word-split on purpose: every container with the file open (an app
-              # and its worker) must be stopped, or it writes through the old inode.
-              for c in $DEV_APP_CONTAINER; do
-                docker stop "$c" 2>/dev/null || echo "  ($c not running — proceeding)"
-              done
+            # Step 6: Stop every dev container holding the DB file.
+            echo "Step 6: Stopping dev containers..."
+            read -ra DEV_APPS <<< "$DEV_APP_CONTAINER"
+            start_dev() {
+              if (( ${#DEV_APPS[@]} )); then
+                for c in "${DEV_APPS[@]}"; do docker start "$c" || echo "::error::could not start $c"; done
+              else
+                (cd "$REPO_DIR" && docker compose -f "$DEV_COMPOSE_FILE" start)
+              fi
+            }
+            # A failure between stop and start would otherwise leave dev down.
+            trap start_dev ERR
+            if (( ${#DEV_APPS[@]} )); then
+              # An app and its worker both hold the file; a running one keeps
+              # writing through the old inode.
+              for c in "${DEV_APPS[@]}"; do docker stop "$c"; done
             else
-              cd "$REPO_DIR"
-              docker compose -f "$DEV_COMPOSE_FILE" stop
+              (cd "$REPO_DIR" && docker compose -f "$DEV_COMPOSE_FILE" stop)
+            fi
+            if [[ "$(docker inspect -f '{{.State.Running}}' "$DEV_DB_CONTAINER")" == true ]]; then
+              echo "::error::$DEV_DB_CONTAINER is still running; list it in dev-app-container" >&2
+              false
             fi
 
             # Step 7: Copy the prod snapshot into the dev container's DB path.
@@ -430,16 +441,17 @@ jobs:
             DEV_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$DEV_DB_CONTAINER")
             docker run --rm --volumes-from "$DEV_DB_CONTAINER" --entrypoint rm "$DEV_IMAGE" \
               -f "${DEV_DB_PATH}-wal" "${DEV_DB_PATH}-shm"
+            # --volumes-from can't see a path in the container's own layer.
+            if docker cp "${DEV_DB_CONTAINER}:${DEV_DB_PATH}-wal" - >/dev/null 2>&1; then
+              echo "::error::${DEV_DB_PATH}-wal survived; the DB is not on a volume" >&2
+              false
+            fi
             docker cp "$HOST_SNAPSHOT" "${DEV_DB_CONTAINER}:${DEV_DB_PATH}"
 
-            # Step 8: Start dev app container.
-            echo "Step 8: Starting dev app container..."
-            if [[ -n "$DEV_APP_CONTAINER" ]]; then
-              for c in $DEV_APP_CONTAINER; do docker start "$c"; done
-            else
-              cd "$REPO_DIR"
-              docker compose -f "$DEV_COMPOSE_FILE" start
-            fi
+            # Step 8: Start the dev containers.
+            echo "Step 8: Starting dev containers..."
+            trap - ERR
+            start_dev
 
             # Step 9: Cleanup host temp file.
             echo "Step 9: Cleaning up host temp files..."
