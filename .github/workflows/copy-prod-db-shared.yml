@@ -217,8 +217,9 @@ on:
       post-restore-command:
         description: >-
           Run in `repo-dir` on the VPS after the restore, while `dev-app-container`
-          is still stopped, e.g. clearing copied queued jobs. A non-zero exit fails
-          the copy (the containers are started again first).
+          is still stopped, e.g. clearing copied queued jobs. Trusted caller code,
+          like deploy-command. A non-zero exit fails the copy and leaves the
+          containers stopped, so they can't run what it failed to clear.
         required: false
         type: string
         default: ''
@@ -427,14 +428,16 @@ jobs:
             echo "Step 6: Stopping dev containers..."
             read -ra DEV_APPS <<< "$DEV_APP_CONTAINER"
             start_dev() {
+              local rc=0
               if (( ${#DEV_APPS[@]} )); then
-                for c in "${DEV_APPS[@]}"; do docker start "$c" || echo "::error::could not start $c"; done
+                for c in "${DEV_APPS[@]}"; do docker start "$c" || { echo "::error::could not start $c"; rc=1; }; done
               else
-                (cd "$REPO_DIR" && docker compose -f "$DEV_COMPOSE_FILE" start)
+                (cd "$REPO_DIR" && docker compose -f "$DEV_COMPOSE_FILE" start) || rc=1
               fi
+              return "$rc"
             }
-            # A failure between stop and start would otherwise leave dev down.
-            trap start_dev ERR
+            # Until the DB file is replaced, a failure restarts dev on its old DB.
+            trap 'start_dev || true' ERR
             if (( ${#DEV_APPS[@]} )); then
               # An app and its worker both hold the file; a running one keeps
               # writing through the old inode.
@@ -460,15 +463,20 @@ jobs:
               echo "::error::${DEV_DB_PATH}-wal survived; the DB is not on a volume" >&2
               false
             fi
+            # From here a failure leaves dev stopped: restarting it on a half-written
+            # DB, or before post-restore-command cleared copied jobs, is worse.
+            trap - ERR
             docker cp "$HOST_SNAPSHOT" "${DEV_DB_CONTAINER}:${DEV_DB_PATH}"
             if [[ -n "$POST_RESTORE_COMMAND" ]]; then
               echo "Post-restore: $POST_RESTORE_COMMAND"
-              (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND")
+              if ! (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND"); then
+                echo "::error::post-restore-command failed; left stopped: ${DEV_APPS[*]:-the $DEV_COMPOSE_FILE stack}" >&2
+                exit 1
+              fi
             fi
 
             # Step 8: Start the dev containers.
             echo "Step 8: Starting dev containers..."
-            trap - ERR
             start_dev
 
             # Step 9: Cleanup host temp file.
@@ -569,10 +577,18 @@ jobs:
             # "already exists". WITH (FORCE) ends the app's connections instead of
             # waiting on their locks. Step 3's backup is the way back if this fails.
             read -ra DEV_APPS <<< "$DEV_APP_CONTAINER"
-            start_dev() { for c in "${DEV_APPS[@]}"; do docker start "$c" || echo "::error::could not start $c"; done; }
-            # A failure between stop and start would otherwise leave dev down.
-            trap start_dev ERR
-            for c in "${DEV_APPS[@]}"; do docker stop "$c"; done
+            start_dev() {
+              local rc=0
+              (( ${#DEV_APPS[@]} )) || return 0
+              for c in "${DEV_APPS[@]}"; do docker start "$c" || { echo "::error::could not start $c"; rc=1; }; done
+              return "$rc"
+            }
+            if (( ${#DEV_APPS[@]} )); then
+              for c in "${DEV_APPS[@]}"; do docker stop "$c"; done
+            fi
+            # Once the DROP runs, a failure leaves the app containers stopped: on an
+            # empty or half-restored DB, or with copied jobs post-restore-command
+            # hasn't cleared, a restarted app does more harm than a stopped one.
 
             echo "Step 4: Recreating dev DB and restoring prod dump..."
             if ! { docker exec "$DEV_DB_CONTAINER" psql -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 \
@@ -580,17 +596,18 @@ jobs:
                      -c "CREATE DATABASE \"$EFFECTIVE_DEV_DB\" OWNER \"$DB_USER\"" &&
                    gunzip -c "$HOST_PROD_DUMP" | docker exec -i "$DEV_DB_CONTAINER" \
                      pg_restore -U "$DB_USER" --no-privileges --no-owner -d "$EFFECTIVE_DEV_DB"; }; then
-              echo "::error::restore into $EFFECTIVE_DEV_DB failed; dev's previous DB is at $HOST_DEV_BACKUP on the VPS" >&2
-              start_dev
+              echo "::error::restore into $EFFECTIVE_DEV_DB failed; dev's previous DB is at $HOST_DEV_BACKUP on the VPS; left stopped: ${DEV_APPS[*]:-none}" >&2
               exit 1
             fi
 
             echo "  Restore complete."
             if [[ -n "$POST_RESTORE_COMMAND" ]]; then
               echo "Post-restore: $POST_RESTORE_COMMAND"
-              (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND")
+              if ! (cd "$REPO_DIR" && bash -c "$POST_RESTORE_COMMAND"); then
+                echo "::error::post-restore-command failed; left stopped: ${DEV_APPS[*]:-none}" >&2
+                exit 1
+              fi
             fi
-            trap - ERR
             start_dev
 
             # Step 5: Cleanup host temp files.

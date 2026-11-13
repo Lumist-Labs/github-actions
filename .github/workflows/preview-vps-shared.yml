@@ -247,7 +247,8 @@ on:
         description: >-
           Run in `repo-dir` on the VPS after the seed's restore, while
           `preview-app-container` is stopped, e.g. deleting dev's copied queued jobs
-          so they don't run again on preview. Non-zero fails the seed.
+          so they don't run again on preview. Trusted caller code, like
+          deploy-command. Non-zero fails the seed and leaves those containers stopped.
         required: false
         type: string
         default: ''
