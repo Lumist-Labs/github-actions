@@ -52,8 +52,11 @@ repo, keeping the scheme, when its owner/name differs.
 | `preflight-command` | no | `''` | Run in the `preflight-service` image against the merged `compose config` JSON (mounted at `/preflight/config.json`, appended as the last arg, run via `compose run --no-deps`) before compose up. Non-zero fails the deploy |
 | `preflight-service` | with the above | `''` | Compose service whose image runs it; built or pulled first |
 | `pre-compose-up-script` | no | `''` | Bash run after the `.env` write, before compose up. Rollback's DB restore goes here |
+| `docker-prune-days` | no | `0` | After a healthy deploy, prune this project's unused images and the box's build cache older than this. `0` = off |
 
-After a successful deploy, the app's untagged images are pruned (`docker image prune` filtered on its compose project label). Tagged images, images in use and other projects' images are left alone. Only built images carry that label, so `compose-build: false` deploys and `deploy-command` deploys (which may set their own `-p`) are not pruned here. Build cache is the box janitor's job: [`docker-prune.sh`](../../scripts/docker-prune.sh).
+After a successful deploy, the app's untagged images are pruned (`docker image prune` filtered on its compose project label). Tagged images, images in use and other projects' images are left alone. Only built images carry that label, so `compose-build: false` deploys and `deploy-command` deploys (which may set their own `-p`) are not pruned here.
+
+With `docker-prune-days` above 0 (`deploy-vps-shared` passes 7; rollback leaves it at 0), the same step also removes the project's unused images (tagged or not) and the box's build cache older than that many days. The image prune stays project-scoped because an unscoped `prune -a` deletes parked apps' images (see [`docker-prune.sh`](../../scripts/docker-prune.sh)). That script is still the box-wide janitor, and it prunes cache older than 24h where it is installed.
 
 **Pre-deploy DB snapshot**
 
